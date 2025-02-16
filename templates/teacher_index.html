@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="dashboard-header">
+  <h1>Teacher Dashboard</h1>
+  <p>Welcome, Teacher!</p>
+</div>
+<div class="text-center">
+  <div class="video-container">
+    <video id="videoElement" autoplay playsinline></video>
+    <canvas id="canvasElement" width="640" height="480" style="display: none;"></canvas>
+  </div>
+  <div class="btn-group d-flex justify-content-center mt-3" role="group">
+    <form id="attendanceHomeForm" method="POST" action="{{ url_for('attendance_home') }}" class="mr-2">
+      <input type="hidden" id="photoData" name="photoData">
+      <button type="submit" class="btn btn-success">Mark Attendance</button>
+    </form>
+    <a href="{{ url_for('request_registration') }}" class="btn btn-info mr-2">Register Student Request</a>
+    <a href="{{ url_for('show_attendance') }}" class="btn btn-secondary">View Attendance</a>
+  </div>
+  <button id="captureButton" class="btn btn-primary mt-3">Capture Photo</button>
+</div>
+<script>
+  document.getElementById('captureButton').addEventListener('click', function(){
+    const canvas = document.getElementById('canvasElement');
+    const video = document.getElementById('videoElement');
+    let context = canvas.getContext('2d');
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    let dataURL = canvas.toDataURL('image/jpeg');
+    document.getElementById('photoData').value = dataURL;
+  });
+</script>
+{% endblock %}

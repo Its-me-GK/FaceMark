@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6">
+    <h2>Student Registration Request</h2>
+    <form method="POST" action="{{ url_for('request_registration') }}" enctype="multipart/form-data">
+      <div class="form-group">
+        <label for="student_name">Student Name:</label>
+        <input type="text" class="form-control" id="student_name" name="student_name" required>
+      </div>
+      <div class="form-group">
+        <label for="branch">Branch:</label>
+        <input type="text" class="form-control" id="branch" name="branch">
+      </div>
+      <div class="form-group">
+        <label for="class">Class:</label>
+        <input type="text" class="form-control" id="class" name="class">
+      </div>
+      <div class="form-group">
+        <label for="roll_number">Roll Number:</label>
+        <input type="text" class="form-control" id="roll_number" name="roll_number">
+      </div>
+      <div class="form-group">
+        <label for="photo">Upload Photo:</label>
+        <input type="file" class="form-control-file" id="photo" name="photo" accept="image/*" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Submit Request</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

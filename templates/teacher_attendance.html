@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Take Attendance</h2>
+<p class="text-muted">Upload one or more photos for attendance.</p>
+<form method="POST" action="{{ url_for('teacher_attendance') }}" enctype="multipart/form-data">
+  <div class="form-group">
+    <label for="attendance_photos">Upload Photo(s):</label>
+    <input type="file" class="form-control-file" id="attendance_photos" name="attendance_photos" accept="image/*" multiple required>
+  </div>
+  <button type="submit" class="btn btn-success">Mark Attendance</button>
+</form>
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Attendance Records</h2>
+<form method="GET" action="{{ url_for('show_attendance') }}" class="form-inline mb-3">
+  <label class="mr-2" for="start_date">Start Date:</label>
+  <input type="date" id="start_date" name="start_date" class="form-control mr-3">
+  <label class="mr-2" for="end_date">End Date:</label>
+  <input type="date" id="end_date" name="end_date" class="form-control mr-3">
+  <label class="mr-2" for="start_time">Start Time:</label>
+  <input type="time" id="start_time" name="start_time" class="form-control mr-3">
+  <label class="mr-2" for="end_time">End Time:</label>
+  <input type="time" id="end_time" name="end_time" class="form-control mr-3">
+  <button type="submit" class="btn btn-primary">Filter</button>
+  <a href="{{ url_for('show_attendance', view_all=1) }}" class="btn btn-secondary ml-2">View Complete Attendance</a>
+  <button type="button" id="clearRecords" class="btn btn-warning ml-2">Clear Records</button>
+</form>
+<div id="attendanceSummary">
+  {% if summary %}
+    <p>Total Students: {{ summary.total }}, Present: {{ summary.present }}, Absent: {{ summary.absent }}</p>
+  {% endif %}
+</div>
+{% if attendance_records %}
+  {% set current_day = None %}
+  {% for record in attendance_records %}
+    {% set record_day = record.timestamp.split(' ')[0] %}
+    {% if current_day != record_day %}
+      {% if not loop.first %}
+        <div class="day-break"></div>
+      {% endif %}
+      {% set current_day = record_day %}
+    {% endif %}
+    <table class="table table-bordered">
+      <thead>
+        <tr>
+          <th>Roll Number</th>
+          <th>Name</th>
+          <th>Branch</th>
+          <th>Status</th>
+          <th>Date & Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ record.roll_number }}</td>
+          <td>{{ record.name }}</td>
+          <td>{{ record.branch }}</td>
+          <td>{{ record.status }}</td>
+          <td>{{ record.timestamp }}</td>
+        </tr>
+      </tbody>
+    </table>
+  {% endfor %}
+  <div class="mb-3">
+    <a href="{{ url_for('download_attendance', file_format='excel', start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), start_time=request.args.get('start_time'), end_time=request.args.get('end_time')) }}" class="btn btn-success">Download Excel</a>
+    <a href="{{ url_for('download_attendance', file_format='pdf', start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), start_time=request.args.get('start_time'), end_time=request.args.get('end_time')) }}" class="btn btn-danger">Download PDF</a>
+  </div>
+{% else %}
+  <p>No attendance records found for the selected period.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="dashboard-header">
+  <h1>Admin Dashboard</h1>
+  <p>Welcome, Admin!</p>
+</div>
+<div class="text-center">
+  <div class="btn-group" role="group">
+    <a href="{{ url_for('list_teachers') }}" class="btn btn-secondary">Manage Teachers</a>
+    <a href="{{ url_for('list_students') }}" class="btn btn-secondary">Manage Students</a>
+    <a href="{{ url_for('admin_attendance') }}" class="btn btn-secondary">View Attendance</a>
+  </div>
+</div>
+{% endblock %}

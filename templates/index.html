@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="text-center">Welcome to the Face Recognition Attendance System</h2>
+
+<div class="text-center">
+    <!-- Video feed -->
+    <video id="videoElement" autoplay playsinline></video>
+    <canvas id="canvasElement" width="640" height="480" style="display: none;"></canvas>
+    <img id="capturedImage" src="" alt="Captured Image" class="img-fluid mt-3">
+    
+    <br>
+    <button id="captureButton" class="btn btn-primary mt-3">Take Photo</button>
+    
+    <!-- Hidden input to store captured image data -->
+    <form id="imageForm" method="POST" action="{{ url_for('upload') }}">
+        <input type="hidden" id="photoData" name="photoData">
+        <!-- Option to choose a file from file manager -->
+        <div class="form-group mt-3">
+            <label for="fileInput">Or select a photo:</label>
+            <input type="file" id="fileInput" name="fileInput" accept="image/*" class="form-control-file">
+        </div>
+        <button type="submit" class="btn btn-success">Submit Photo</button>
+    </form>
+</div>
+{% endblock %}

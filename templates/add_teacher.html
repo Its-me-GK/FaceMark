@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Add Teacher</h2>
+<form method="POST" action="{{ url_for('add_teacher') }}" enctype="multipart/form-data">
+  <div class="form-group">
+    <label for="name">Name:</label>
+    <input type="text" class="form-control" id="name" name="name" required>
+  </div>
+  <div class="form-group">
+    <label for="email">Email:</label>
+    <input type="email" class="form-control" id="email" name="email">
+  </div>
+  <div class="form-group">
+    <label for="photo">Photo:</label>
+    <input type="file" class="form-control-file" id="photo" name="photo" accept="image/*" required>
+  </div>
+  <button type="submit" class="btn btn-primary">Add Teacher</button>
+</form>
+{% endblock %}
