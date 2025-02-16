@@ -46,13 +46,15 @@ CREATE TABLE IF NOT EXISTS attendance (
     FOREIGN KEY (student_id) REFERENCES students(student_id)
 );
 
--- Student registration requests (submitted by teachers; require three photos)
+-- Student registration requests (submitted by teachers)
 CREATE TABLE IF NOT EXISTS student_requests (
   request_id INT AUTO_INCREMENT PRIMARY KEY,
   student_name VARCHAR(100),
   branch VARCHAR(50),
   class VARCHAR(50),
   roll_number VARCHAR(20),
-  photo VARCHAR(255),
+  photo1 VARCHAR(255),
+  photo2 VARCHAR(255),
+  photo3 VARCHAR(255),
   status ENUM('pending','approved','rejected') DEFAULT 'pending'
 );

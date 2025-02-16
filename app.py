@@ -1,6 +1,7 @@
 import os
 import base64
 import io
+import json
 from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
 import mysql.connector
@@ -381,8 +382,7 @@ def manage_attendance():
         student_id = request.form.get('student_id')
         date_str = request.form.get('date')
         status = request.form.get('status')
-        cursor.execute("INSERT INTO attendance (student_id, timestamp, status) VALUES (%s, %s, %s)", 
-                       (student_id, date_str, status))
+        cursor.execute("INSERT INTO attendance (student_id, timestamp, status) VALUES (%s, %s, %s)", (student_id, date_str, status))
         conn.commit()
         flash("Attendance record added.", "success")
     cursor.execute("SELECT * FROM attendance")
@@ -393,7 +393,7 @@ def manage_attendance():
     conn.close()
     return render_template('manage_attendance.html', records=records)
 
-# Admin - List Registration Requests
+# Admin - List Registration Requests and process them
 @app.route('/admin/requests', endpoint='list_requests')
 def list_requests():
     if 'user' not in session or session['user']['role'] != 'admin':
@@ -415,7 +415,43 @@ def admin_action():
     request_id = request.form.get('request_id')
     action = request.form.get('action')
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM student_requests WHERE request_id=%s", (request_id,))
+    req_data = cursor.fetchone()
+    if not req_data:
+        flash("Request not found.", "danger")
+        return redirect(url_for('list_requests'))
+    if action == 'approved':
+        # Approve the request: register the student.
+        # We'll use the provided roll_number as student_id.
+        student_id = req_data['roll_number']
+        try:
+            cursor.execute("INSERT INTO students (student_id, name, branch, class, roll_number) VALUES (%s, %s, %s, %s, %s)",
+                           (student_id, req_data['student_name'], req_data['branch'], req_data['class'], req_data['roll_number']))
+            conn.commit()
+        except mysql.connector.errors.IntegrityError:
+            flash("Student already registered.", "danger")
+            return redirect(url_for('list_requests'))
+        # Process each photo: photo1, photo2, photo3
+        photos = [req_data['photo1'], req_data['photo2'], req_data['photo3']]
+        for photo_url in photos:
+            # Get the absolute path from the URL (assuming static/uploads/ is used)
+            filename = photo_url.split('/')[-1]
+            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            image = np.array(Image.open(image_path))
+            image = apply_filters(image)
+            faces = detect_faces(image)
+            if len(faces) != 1:
+                flash("Approved request photo validation failed.", "danger")
+                return redirect(url_for('list_requests'))
+            box = faces[0]['box']
+            face_img = extract_face(image, box)
+            embedding = get_embedding(face_img)
+            emb_str = ",".join(map(str, embedding.tolist()))
+            cursor.execute("INSERT INTO student_faces (student_id, embedding, image_path) VALUES (%s, %s, %s)",
+                           (student_id, emb_str, photo_url))
+            conn.commit()
+    # Update the request status
     cursor.execute("UPDATE student_requests SET status=%s WHERE request_id=%s", (action, request_id))
     conn.commit()
     cursor.close()
@@ -432,13 +468,12 @@ def teacher_index():
         return redirect(url_for('login'))
     return render_template('teacher_index.html')
 
-# For live capture with multiple photos, we now expect a JSON array of data URLs in the 'photoData' field.
+# Live capture: expects a JSON array of data URLs in 'photoData'
 @app.route('/teacher/attendance_live', methods=['POST'])
 def attendance_live():
     if 'user' not in session or session['user']['role'] != 'teacher':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    import json
     photo_data_json = request.form.get('photoData')
     if not photo_data_json:
         flash("No captured photos found.", "warning")
@@ -485,7 +520,6 @@ def attendance_live():
                 cv2.rectangle(image, (x, y), (x+w, y+h), (0, 0, 255), 2)
                 cv2.putText(image, "Unknown", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         all_annotated.append(image)
-    # Mark attendance once per student
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT student_id FROM students")
@@ -517,7 +551,7 @@ def teacher_attendance():
         return redirect(url_for('login'))
     if request.method=='POST':
         photos = request.files.getlist('attendance_photos')
-        if not photos or all(photo.filename == "" for photo in photos):
+        if not photos or all(photo.filename=="" for photo in photos):
             flash("Please upload at least one photo.", "warning")
             return redirect(url_for('teacher_attendance'))
         recognized = set()
@@ -727,15 +761,20 @@ def request_registration():
             return redirect(url_for('request_registration'))
         photo_urls = []
         for file in files:
+            image = np.array(Image.open(file.stream).convert('RGB'))
+            image = apply_filters(image)
+            faces = detect_faces(image)
+            if len(faces) != 1:
+                flash("Each photo must contain exactly one face.", "danger")
+                return redirect(url_for('request_registration'))
             filename = f"request_{datetime.now().timestamp()}_{file.filename}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            Image.open(file.stream).save(path)
+            Image.fromarray(image).save(path)
             photo_urls.append(url_for('static', filename='uploads/' + filename))
-        photo_url = photo_urls[0]  # Use first photo as representative
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO student_requests (student_name, branch, class, roll_number, photo) VALUES (%s, %s, %s, %s, %s)",
-                       (student_name, branch, _class, roll_number, photo_url))
+        cursor.execute("INSERT INTO student_requests (student_name, branch, class, roll_number, photo1, photo2, photo3) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                       (student_name, branch, _class, roll_number, photo_urls[0], photo_urls[1], photo_urls[2]))
         conn.commit()
         cursor.close()
         conn.close()
