@@ -22,7 +22,7 @@ body {
   margin-bottom: 10px;
 }
 
-/* Home page button group styling */
+/* Teacher dashboard button group styling */
 .btn-group {
   margin-top: 20px;
 }
@@ -39,8 +39,14 @@ body {
   margin-bottom: 30px;
 }
 
-/* Purple line-break for day separation in attendance records */
+/* Purple line-break for day separation */
 .day-break {
   border-top: 2px solid purple;
   margin: 20px 0;
+}
+
+/* Captured photos gallery */
+#capturedGallery img {
+  max-width: 100%;
+  margin-bottom: 10px;
 }

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Add Student</h2>
+<p class="text-muted">Please upload exactly three photos for accurate face registration. Each photo must contain exactly one face.</p>
+<form method="POST" action="{{ url_for('add_student') }}" enctype="multipart/form-data">
+  <div class="form-group">
+    <label for="student_id">Student ID:</label>
+    <input type="text" class="form-control" id="student_id" name="student_id" required>
+  </div>
+  <div class="form-group">
+    <label for="name">Name:</label>
+    <input type="text" class="form-control" id="name" name="name" required>
+  </div>
+  <div class="form-group">
+    <label for="branch">Branch:</label>
+    <input type="text" class="form-control" id="branch" name="branch">
+  </div>
+  <div class="form-group">
+    <label for="class">Class:</label>
+    <input type="text" class="form-control" id="class" name="class">
+  </div>
+  <div class="form-group">
+    <label for="roll_number">Roll Number:</label>
+    <input type="text" class="form-control" id="roll_number" name="roll_number">
+  </div>
+  <div class="form-group">
+    <label>Upload Three Photos:</label>
+    <input type="file" class="form-control-file" name="face_photo1" accept="image/*" required>
+    <input type="file" class="form-control-file" name="face_photo2" accept="image/*" required>
+    <input type="file" class="form-control-file" name="face_photo3" accept="image/*" required>
+  </div>
+  <button type="submit" class="btn btn-primary">Add Student</button>
+</form>
+{% endblock %}

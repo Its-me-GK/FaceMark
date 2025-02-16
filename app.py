@@ -14,6 +14,17 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 import cv2
+import concurrent.futures
+
+# Configure TensorFlow GPU memory growth for better GPU utilization.
+import tensorflow as tf
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -23,22 +34,28 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 
 def get_db_connection():
-    return mysql.connector.connect(
+    conn = mysql.connector.connect(
         host=app.config['MYSQL_HOST'],
         user=app.config['MYSQL_USER'],
         password=app.config['MYSQL_PASSWORD'],
         database=app.config['MYSQL_DB']
     )
+    conn.autocommit = True
+    return conn
 
-# ------------------- Authentication Routes -------------------
+# ------------------- Authentication -------------------
+
+@app.route('/')
+def root():
+    return redirect(url_for('welcome'))
 
 @app.route('/welcome')
 def welcome():
     return render_template('welcome.html')
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/login', methods=['GET','POST'])
 def login():
-    if request.method == 'POST':
+    if request.method=='POST':
         username = request.form.get('username')
         password = request.form.get('password')
         conn = get_db_connection()
@@ -66,13 +83,14 @@ def logout():
 
 # ------------------- Admin Routes -------------------
 
-@app.route('/admin')
+@app.route('/admin', endpoint='admin_index')
 def admin_index():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
     return render_template('admin_index.html')
 
+# Admin - Teacher CRUD
 @app.route('/admin/teachers')
 def list_teachers():
     if 'user' not in session or session['user']['role'] != 'admin':
@@ -86,56 +104,324 @@ def list_teachers():
     conn.close()
     return render_template('list_teachers.html', teachers=teachers)
 
-@app.route('/admin/teachers/add', methods=['GET', 'POST'])
+@app.route('/admin/teachers/add', methods=['GET','POST'])
 def add_teacher():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    if request.method == 'POST':
+    if request.method=='POST':
         name = request.form.get('name')
         email = request.form.get('email')
+        username = request.form.get('username')
+        password = request.form.get('password')
         photo_file = request.files.get('photo')
-        photo_path = ""
-        if photo_file and photo_file.filename != "":
+        photo_url = ""
+        if photo_file and photo_file.filename!="":
             filename = f"teacher_{datetime.now().timestamp()}.jpg"
-            photo_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            Image.open(photo_file.stream).save(photo_path)
-            photo_path = url_for('static', filename='uploads/' + filename)
+            path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            Image.open(photo_file.stream).save(path)
+            photo_url = url_for('static', filename='uploads/' + filename)
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO teachers (name, email, photo) VALUES (%s, %s, %s)", (name, email, photo_path))
-        conn.commit()
+        try:
+            cursor.execute("INSERT INTO teachers (name, email, username, photo) VALUES (%s, %s, %s, %s)",
+                           (name, email, username, photo_url))
+            conn.commit()
+        except mysql.connector.errors.IntegrityError:
+            flash("Teacher with that username may already exist.", "danger")
+            return redirect(url_for('add_teacher'))
+        try:
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (%s, %s, 'teacher')", (username, password))
+            conn.commit()
+        except mysql.connector.errors.IntegrityError:
+            flash("Duplicate username in users table.", "danger")
+            return redirect(url_for('add_teacher'))
         cursor.close()
         conn.close()
         flash("Teacher added successfully.", "success")
         return redirect(url_for('list_teachers'))
     return render_template('add_teacher.html')
 
-# (You can add edit_teacher and delete_teacher routes similarly.)
+@app.route('/admin/teachers/edit/<int:teacher_id>', methods=['GET','POST'])
+def edit_teacher(teacher_id):
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    if request.method=='POST':
+        name = request.form.get('name')
+        email = request.form.get('email')
+        photo_file = request.files.get('photo')
+        photo_url = None
+        if photo_file and photo_file.filename!="":
+            filename = f"teacher_{datetime.now().timestamp()}.jpg"
+            path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            Image.open(photo_file.stream).save(path)
+            photo_url = url_for('static', filename='uploads/' + filename)
+        if photo_url:
+            cursor.execute("UPDATE teachers SET name=%s, email=%s, photo=%s WHERE teacher_id=%s", (name, email, photo_url, teacher_id))
+        else:
+            cursor.execute("UPDATE teachers SET name=%s, email=%s WHERE teacher_id=%s", (name, email, teacher_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        flash("Teacher updated successfully.", "success")
+        return redirect(url_for('list_teachers'))
+    else:
+        cursor.execute("SELECT * FROM teachers WHERE teacher_id=%s", (teacher_id,))
+        teacher = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return render_template('edit_teacher.html', teacher=teacher)
+
+@app.route('/admin/teachers/delete/<int:teacher_id>')
+def delete_teacher(teacher_id):
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM teachers WHERE teacher_id=%s", (teacher_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    flash("Teacher deleted successfully.", "success")
+    return redirect(url_for('list_teachers'))
+
+# Admin - Student CRUD
+@app.route('/admin/students')
+def list_students():
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM students")
+    students = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return render_template('list_students.html', students=students)
+
+@app.route('/admin/students/add', methods=['GET','POST'])
+def add_student():
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    if request.method=='POST':
+        student_id = request.form.get('student_id')
+        name = request.form.get('name')
+        branch = request.form.get('branch')
+        _class = request.form.get('class')
+        roll_number = request.form.get('roll_number')
+        files = [request.files.get('face_photo1'), request.files.get('face_photo2'), request.files.get('face_photo3')]
+        if not all(files) or any(f.filename=="" for f in files):
+            flash("Please upload exactly three photos.", "warning")
+            return redirect(url_for('add_student'))
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("INSERT INTO students (student_id, name, branch, class, roll_number) VALUES (%s, %s, %s, %s, %s)",
+                           (student_id, name, branch, _class, roll_number))
+            conn.commit()
+        except mysql.connector.errors.IntegrityError:
+            flash("Student ID already exists.", "danger")
+            return redirect(url_for('add_student'))
+        for file in files:
+            image = np.array(Image.open(file.stream).convert('RGB'))
+            image = apply_filters(image)
+            faces = detect_faces(image)
+            if len(faces) != 1:
+                flash("Each student registration photo must contain exactly one face.", "danger")
+                return redirect(url_for('add_student'))
+            box = faces[0]['box']
+            face_img = extract_face(image, box)
+            embedding = get_embedding(face_img)
+            emb_str = ",".join(map(str, embedding.tolist()))
+            filename = f"{student_id}_{datetime.now().timestamp()}_{file.filename}"
+            path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            Image.fromarray(image).save(path)
+            cursor.execute("INSERT INTO student_faces (student_id, embedding, image_path) VALUES (%s, %s, %s)",
+                           (student_id, emb_str, url_for('static', filename='uploads/' + filename)))
+            conn.commit()
+        cursor.close()
+        conn.close()
+        flash("Student added successfully.", "success")
+        return redirect(url_for('list_students'))
+    return render_template('add_student.html')
+
+@app.route('/admin/students/edit/<student_id>', methods=['GET','POST'])
+def edit_student(student_id):
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    if request.method=='POST':
+        name = request.form.get('name')
+        branch = request.form.get('branch')
+        _class = request.form.get('class')
+        roll_number = request.form.get('roll_number')
+        cursor.execute("UPDATE students SET name=%s, branch=%s, class=%s, roll_number=%s WHERE student_id=%s",
+                       (name, branch, _class, roll_number, student_id))
+        conn.commit()
+        files = [request.files.get('face_photo1'), request.files.get('face_photo2'), request.files.get('face_photo3')]
+        if all(files) and not any(f.filename=="" for f in files):
+            cursor.execute("DELETE FROM student_faces WHERE student_id=%s", (student_id,))
+            conn.commit()
+            for file in files:
+                image = np.array(Image.open(file.stream).convert('RGB'))
+                image = apply_filters(image)
+                faces = detect_faces(image)
+                if len(faces) != 1:
+                    flash("Each student photo must contain exactly one face.", "danger")
+                    return redirect(url_for('edit_student', student_id=student_id))
+                box = faces[0]['box']
+                face_img = extract_face(image, box)
+                embedding = get_embedding(face_img)
+                emb_str = ",".join(map(str, embedding.tolist()))
+                filename = f"{student_id}_{datetime.now().timestamp()}_{file.filename}"
+                path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                Image.fromarray(image).save(path)
+                cursor.execute("INSERT INTO student_faces (student_id, embedding, image_path) VALUES (%s, %s, %s)",
+                               (student_id, emb_str, url_for('static', filename='uploads/' + filename)))
+                conn.commit()
+        cursor.close()
+        conn.close()
+        flash("Student updated successfully.", "success")
+        return redirect(url_for('list_students'))
+    else:
+        cursor.execute("SELECT * FROM students WHERE student_id=%s", (student_id,))
+        student = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return render_template('edit_student.html', student=student)
+
+@app.route('/admin/students/delete/<student_id>')
+def delete_student(student_id):
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM students WHERE student_id=%s", (student_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    flash("Student deleted successfully.", "success")
+    return redirect(url_for('list_students'))
 
 @app.route('/admin/attendance')
 def admin_attendance():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    # By default, show today's attendance
     today = datetime.now().strftime('%Y-%m-%d')
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT s.roll_number, s.name, s.branch, a.status, a.timestamp 
-        FROM attendance a JOIN students s ON a.student_id = s.student_id 
-        WHERE DATE(a.timestamp)=%s ORDER BY s.roll_number
-    """, (today,))
+    cursor.execute(
+        "SELECT s.roll_number, s.name, s.branch, a.status, a.timestamp FROM attendance a JOIN students s ON a.student_id = s.student_id WHERE DATE(a.timestamp)=%s ORDER BY s.roll_number",
+        (today,))
     records = cursor.fetchall()
+    for r in records:
+        r['date'] = r['timestamp'].strftime('%Y-%m-%d')
     cursor.execute("SELECT COUNT(*) as total FROM students")
     total = cursor.fetchone()['total']
-    present = sum(1 for r in records if r['status'] == 'present')
+    present = sum(1 for r in records if r['status']=='present')
     absent = total - present
     summary = {'total': total, 'present': present, 'absent': absent}
     cursor.close()
     conn.close()
     return render_template('show_attendance.html', attendance_records=records, summary=summary)
+
+@app.route('/admin/attendance/edit/<int:attendance_id>', methods=['GET','POST'])
+def edit_attendance(attendance_id):
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    if request.method=='POST':
+        status = request.form.get('status')
+        cursor.execute("UPDATE attendance SET status=%s WHERE id=%s", (status, attendance_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        flash("Attendance record updated.", "success")
+        return redirect(url_for('admin_attendance'))
+    else:
+        cursor.execute("SELECT * FROM attendance WHERE id=%s", (attendance_id,))
+        record = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return render_template('edit_attendance.html', record=record)
+
+@app.route('/admin/attendance/delete/<int:attendance_id>')
+def delete_attendance(attendance_id):
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM attendance WHERE id=%s", (attendance_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    flash("Attendance record deleted.", "success")
+    return redirect(url_for('admin_attendance'))
+
+@app.route('/admin/manage_attendance', methods=['GET','POST'])
+def manage_attendance():
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    if request.method=='POST':
+        student_id = request.form.get('student_id')
+        date_str = request.form.get('date')
+        status = request.form.get('status')
+        cursor.execute("INSERT INTO attendance (student_id, timestamp, status) VALUES (%s, %s, %s)", 
+                       (student_id, date_str, status))
+        conn.commit()
+        flash("Attendance record added.", "success")
+    cursor.execute("SELECT * FROM attendance")
+    records = cursor.fetchall()
+    for r in records:
+        r['date'] = r['timestamp'].strftime('%Y-%m-%d')
+    cursor.close()
+    conn.close()
+    return render_template('manage_attendance.html', records=records)
+
+# Admin - List Registration Requests
+@app.route('/admin/requests', endpoint='list_requests')
+def list_requests():
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM student_requests")
+    requests = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return render_template('list_requests.html', requests=requests)
+
+@app.route('/admin/action', methods=['POST'])
+def admin_action():
+    if 'user' not in session or session['user']['role'] != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('login'))
+    request_id = request.form.get('request_id')
+    action = request.form.get('action')
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE student_requests SET status=%s WHERE request_id=%s", (action, request_id))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    flash("Request updated.", "success")
+    return redirect(url_for('list_requests'))
 
 # ------------------- Teacher Routes -------------------
 
@@ -146,49 +432,62 @@ def teacher_index():
         return redirect(url_for('login'))
     return render_template('teacher_index.html')
 
-# Attendance via live capture from teacher dashboard (single photo)
+# For live capture with multiple photos, we now expect a JSON array of data URLs in the 'photoData' field.
 @app.route('/teacher/attendance_live', methods=['POST'])
-def attendance_home():
+def attendance_live():
     if 'user' not in session or session['user']['role'] != 'teacher':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    if 'photoData' not in request.form or not request.form['photoData']:
-        flash("No captured photo found.", "warning")
+    import json
+    photo_data_json = request.form.get('photoData')
+    if not photo_data_json:
+        flash("No captured photos found.", "warning")
         return redirect(url_for('teacher_index'))
-    data_url = request.form['photoData']
-    header, encoded = data_url.split(',', 1)
-    data = base64.b64decode(encoded)
-    image = np.array(Image.open(io.BytesIO(data)))
-    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    image = apply_filters(image)
-    faces = detect_faces(image)
-    if not faces:
-        flash("No faces detected.", "warning")
+    try:
+        data_urls = json.loads(photo_data_json)
+    except Exception as e:
+        flash("Error parsing captured photos.", "danger")
         return redirect(url_for('teacher_index'))
+    all_annotated = []
     recognized = set()
+    for data_url in data_urls:
+        header, encoded = data_url.split(',', 1)
+        data = base64.b64decode(encoded)
+        image = np.array(Image.open(io.BytesIO(data)))
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        image = apply_filters(image)
+        faces = detect_faces(image)
+        if not faces:
+            continue
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT student_id, embedding FROM student_faces")
+        face_db = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        for face in faces:
+            box = face['box']
+            x, y, w, h = box
+            face_img = extract_face(image, box)
+            emb = get_embedding(face_img)
+            best, best_score = None, -1
+            for rec in face_db:
+                stored = np.array(list(map(float, rec['embedding'].split(','))))
+                score = cosine_similarity(emb, stored)
+                if score > best_score:
+                    best_score = score
+                    best = rec['student_id']
+            if best_score > 0.7:
+                recognized.add(best)
+                cv2.rectangle(image, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                cv2.putText(image, best, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            else:
+                cv2.rectangle(image, (x, y), (x+w, y+h), (0, 0, 255), 2)
+                cv2.putText(image, "Unknown", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        all_annotated.append(image)
+    # Mark attendance once per student
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT student_id, embedding FROM student_faces")
-    face_db = cursor.fetchall()
-    for face in faces:
-        box = face['box']
-        x, y, w, h = box
-        face_img = extract_face(image, box)
-        emb = get_embedding(face_img)
-        best, best_score = None, -1
-        for rec in face_db:
-            stored = np.array(list(map(float, rec['embedding'].split(','))))
-            score = cosine_similarity(emb, stored)
-            if score > best_score:
-                best_score = score
-                best = rec['student_id']
-        if best_score > 0.7:
-            recognized.add(best)
-            cv2.rectangle(image, (x, y), (x+w, y+h), (0,255,0), 2)
-            cv2.putText(image, best, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
-        else:
-            cv2.rectangle(image, (x, y), (x+w, y+h), (0,0,255), 2)
-            cv2.putText(image, "Unknown", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
     cursor.execute("SELECT student_id FROM students")
     all_students = {row['student_id'] for row in cursor.fetchall()}
     for student in all_students:
@@ -201,38 +500,43 @@ def attendance_home():
             return redirect(url_for('teacher_index'))
     cursor.close()
     conn.close()
-    filename = f"attendance_{datetime.now().timestamp()}.jpg"
-    path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    cv2.imwrite(path, image)
-    flash(f"Attendance processed. Recognized: {len(recognized)} students.", "success")
-    return redirect(url_for('attendance_result', filename=filename))
+    filenames = []
+    for idx, img in enumerate(all_annotated):
+        fname = f"attendance_{datetime.now().timestamp()}_{idx}.jpg"
+        path = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+        cv2.imwrite(path, img)
+        filenames.append(fname)
+    flash(f"Attendance processed from live capture. Recognized: {len(recognized)} students.", "success")
+    image_urls = [url_for('static', filename='uploads/' + f) for f in filenames]
+    return render_template('attendance_result.html', image_urls=image_urls)
 
-# Attendance via multiple photo upload (teacher)
-@app.route('/teacher/attendance', methods=['GET', 'POST'])
+@app.route('/teacher/attendance', methods=['GET','POST'])
 def teacher_attendance():
     if 'user' not in session or session['user']['role'] != 'teacher':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    if request.method == 'POST':
+    if request.method=='POST':
         photos = request.files.getlist('attendance_photos')
         if not photos or all(photo.filename == "" for photo in photos):
             flash("Please upload at least one photo.", "warning")
             return redirect(url_for('teacher_attendance'))
         recognized = set()
         annotated_imgs = []
-        for file in photos:
-            image = np.array(Image.open(file.stream).convert('RGB'))
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            image = apply_filters(image)
-            faces = detect_faces(image)
+        def process_photo(file):
+            img = np.array(Image.open(file.stream).convert('RGB'))
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            img = apply_filters(img)
+            faces = detect_faces(img)
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT student_id, embedding FROM student_faces")
             face_db = cursor.fetchall()
+            cursor.close()
+            conn.close()
             for face in faces:
                 box = face['box']
                 x, y, w, h = box
-                face_img = extract_face(image, box)
+                face_img = extract_face(img, box)
                 emb = get_embedding(face_img)
                 best, best_score = None, -1
                 for rec in face_db:
@@ -243,14 +547,14 @@ def teacher_attendance():
                         best = rec['student_id']
                 if best_score > 0.7:
                     recognized.add(best)
-                    cv2.rectangle(image, (x, y), (x+w, y+h), (0,255,0), 2)
-                    cv2.putText(image, best, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+                    cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    cv2.putText(img, best, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 else:
-                    cv2.rectangle(image, (x, y), (x+w, y+h), (0,0,255), 2)
-                    cv2.putText(image, "Unknown", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
-            annotated_imgs.append(image)
-            cursor.close()
-            conn.close()
+                    cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 255), 2)
+                    cv2.putText(img, "Unknown", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            return img
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            annotated_imgs = list(executor.map(process_photo, photos))
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT student_id FROM students")
@@ -267,16 +571,16 @@ def teacher_attendance():
         conn.close()
         filenames = []
         for idx, img in enumerate(annotated_imgs):
-            fname = f"attendance_{int(datetime.now().timestamp())}_{idx}.jpg"
+            fname = f"attendance_{datetime.now().timestamp()}_{idx}.jpg"
             path = os.path.join(app.config['UPLOAD_FOLDER'], fname)
             cv2.imwrite(path, img)
             filenames.append(fname)
-        flash(f"Attendance processed from multiple photos. Recognized: {len(recognized)} students.", "success")
+        flash(f"Attendance processed from uploaded photos. Recognized: {len(recognized)} students.", "success")
         image_urls = [url_for('static', filename='uploads/' + f) for f in filenames]
         return render_template('attendance_result.html', image_urls=image_urls)
     return render_template('teacher_attendance.html')
 
-# ------------------- Attendance Result Route -------------------
+# ------------------- Attendance Result -------------------
 
 @app.route('/attendance_result')
 def attendance_result():
@@ -287,11 +591,10 @@ def attendance_result():
         image_urls = None
     return render_template('attendance_result.html', image_urls=image_urls)
 
-# ------------------- Show Attendance Route -------------------
+# ------------------- Show Attendance -------------------
 
 @app.route('/show_attendance', methods=['GET'])
 def show_attendance():
-    # If "view_all" parameter is provided, show complete attendance (present and absent)
     view_all = request.args.get('view_all')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
@@ -323,10 +626,11 @@ def show_attendance():
     query += " ORDER BY s.roll_number"
     cursor.execute(query, params)
     records = cursor.fetchall()
-    # If not viewing complete attendance, filter for today's present only.
+    for r in records:
+        r['date'] = r['timestamp'].strftime('%Y-%m-%d')
     if not view_all:
         today = datetime.now().strftime('%Y-%m-%d')
-        records = [r for r in records if r['timestamp'].split(' ')[0] == today and r['status'] == 'present']
+        records = [r for r in records if r['date'] == today and r['status'] == 'present']
     cursor.execute("SELECT COUNT(*) as total FROM students")
     total = cursor.fetchone()['total']
     present = sum(1 for r in records if r['status'] == 'present')
@@ -336,7 +640,7 @@ def show_attendance():
     conn.close()
     return render_template('show_attendance.html', attendance_records=records, summary=summary)
 
-# ------------------- Download Attendance Route -------------------
+# ------------------- Download Attendance -------------------
 
 @app.route('/download_attendance')
 def download_attendance():
@@ -388,13 +692,13 @@ def download_attendance():
             data.append([row['roll_number'], row['name'], row['branch'], row['status'], str(row['timestamp'])])
         table = Table(data)
         style = TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.grey),
-            ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
-            ('ALIGN',(0,0),(-1,-1),'CENTER'),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0,0), (-1,0), 12),
-            ('BACKGROUND',(0,1),(-1,-1),colors.beige),
-            ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
         ])
         table.setStyle(style)
         elements = [table]
@@ -407,7 +711,7 @@ def download_attendance():
 
 # ------------------- Student Registration Request (Teacher) -------------------
 
-@app.route('/teacher/request_registration', methods=['GET', 'POST'])
+@app.route('/teacher/request_registration', methods=['GET','POST'])
 def request_registration():
     if 'user' not in session or session['user']['role'] != 'teacher':
         flash("Access denied.", "danger")
@@ -417,15 +721,17 @@ def request_registration():
         branch = request.form.get('branch')
         _class = request.form.get('class')
         roll_number = request.form.get('roll_number')
-        photo_file = request.files.get('photo')
-        if photo_file and photo_file.filename != "":
-            filename = f"request_{datetime.now().timestamp()}.jpg"
-            save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            Image.open(photo_file.stream).save(save_path)
-            photo_url = url_for('static', filename='uploads/' + filename)
-        else:
-            flash("Photo is required for the request.", "warning")
+        files = [request.files.get('face_photo1'), request.files.get('face_photo2'), request.files.get('face_photo3')]
+        if not all(files) or any(f.filename == "" for f in files):
+            flash("Please upload exactly three photos for registration request.", "warning")
             return redirect(url_for('request_registration'))
+        photo_urls = []
+        for file in files:
+            filename = f"request_{datetime.now().timestamp()}_{file.filename}"
+            path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            Image.open(file.stream).save(path)
+            photo_urls.append(url_for('static', filename='uploads/' + filename))
+        photo_url = photo_urls[0]  # Use first photo as representative
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("INSERT INTO student_requests (student_name, branch, class, roll_number, photo) VALUES (%s, %s, %s, %s, %s)",

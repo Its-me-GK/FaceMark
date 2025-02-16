@@ -36,5 +36,5 @@ def get_embedding(face_pixels):
     return embedding[0]
 
 def cosine_similarity(emb1, emb2):
-    """Calculate cosine similarity between two embedding vectors."""
+    """Calculate the cosine similarity between two embedding vectors."""
     return np.dot(emb1, emb2) / (norm(emb1) * norm(emb2))

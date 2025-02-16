@@ -8,7 +8,9 @@
   <div class="btn-group" role="group">
     <a href="{{ url_for('list_teachers') }}" class="btn btn-secondary">Manage Teachers</a>
     <a href="{{ url_for('list_students') }}" class="btn btn-secondary">Manage Students</a>
-    <a href="{{ url_for('admin_attendance') }}" class="btn btn-secondary">View Attendance</a>
+    <a href="{{ url_for('admin_attendance') }}" class="btn btn-secondary">Attendance</a>
+    <a href="{{ url_for('manage_attendance') }}" class="btn btn-secondary">Manage Attendance</a>
+    <a href="{{ url_for('list_requests') }}" class="btn btn-secondary">Requests</a>
   </div>
 </div>
 {% endblock %}

@@ -22,12 +22,13 @@
 {% if attendance_records %}
   {% set current_day = None %}
   {% for record in attendance_records %}
-    {% set record_day = record.timestamp.split(' ')[0] %}
+    {% set record_day = record.timestamp.strftime('%Y-%m-%d') %}
     {% if current_day != record_day %}
       {% if not loop.first %}
         <div class="day-break"></div>
       {% endif %}
       {% set current_day = record_day %}
+      <h4>{{ record_day }}</h4>
     {% endif %}
     <table class="table table-bordered">
       <thead>

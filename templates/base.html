@@ -15,8 +15,16 @@
         {% if session.user %}
           {% if session.user.role == 'admin' %}
             <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_index') }}">Dashboard</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('list_teachers') }}">Manage Teachers</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('list_students') }}">Manage Students</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_attendance') }}">Attendance</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('manage_attendance') }}">Manage Attendance</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('list_requests') }}">Requests</a></li>
           {% else %}
             <li class="nav-item"><a class="nav-link" href="{{ url_for('teacher_index') }}">Dashboard</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('teacher_attendance') }}">Take Attendance</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('request_registration') }}">Register Request</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('show_attendance') }}">Attendance</a></li>
           {% endif %}
           <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Logout</a></li>
         {% else %}

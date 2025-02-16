@@ -1,5 +1,5 @@
 window.addEventListener('load', function () {
-  // Camera functionality (if a video element is present)
+  // Camera functionality for pages with a video element
   const video = document.getElementById('videoElement');
   if (video) {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -15,18 +15,14 @@ window.addEventListener('load', function () {
       console.error("Camera not supported in this browser.");
     }
   }
-  // Clear Records button on attendance view page
+  // Clear Records functionality on attendance view page
   const clearBtn = document.getElementById('clearRecords');
   if (clearBtn) {
     clearBtn.addEventListener('click', function () {
       const tableBody = document.getElementById('attendanceTableBody');
-      if (tableBody) {
-        tableBody.innerHTML = '';
-      }
+      if (tableBody) { tableBody.innerHTML = ''; }
       const summaryDiv = document.getElementById('attendanceSummary');
-      if (summaryDiv) {
-        summaryDiv.innerHTML = '';
-      }
+      if (summaryDiv) { summaryDiv.innerHTML = ''; }
     });
   }
 });

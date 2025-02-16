@@ -3,6 +3,7 @@
 <div class="row justify-content-center">
   <div class="col-md-6">
     <h2>Student Registration Request</h2>
+    <p class="text-muted">Please upload exactly three photos for the registration request. Each photo must contain exactly one face.</p>
     <form method="POST" action="{{ url_for('request_registration') }}" enctype="multipart/form-data">
       <div class="form-group">
         <label for="student_name">Student Name:</label>
@@ -21,8 +22,10 @@
         <input type="text" class="form-control" id="roll_number" name="roll_number">
       </div>
       <div class="form-group">
-        <label for="photo">Upload Photo:</label>
-        <input type="file" class="form-control-file" id="photo" name="photo" accept="image/*" required>
+        <label>Upload Three Photos:</label>
+        <input type="file" class="form-control-file" name="face_photo1" accept="image/*" required>
+        <input type="file" class="form-control-file" name="face_photo2" accept="image/*" required>
+        <input type="file" class="form-control-file" name="face_photo3" accept="image/*" required>
       </div>
       <button type="submit" class="btn btn-primary">Submit Request</button>
     </form>

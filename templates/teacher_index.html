@@ -8,25 +8,38 @@
   <div class="video-container">
     <video id="videoElement" autoplay playsinline></video>
     <canvas id="canvasElement" width="640" height="480" style="display: none;"></canvas>
+    <div id="capturedGallery"></div>
   </div>
   <div class="btn-group d-flex justify-content-center mt-3" role="group">
-    <form id="attendanceHomeForm" method="POST" action="{{ url_for('attendance_home') }}" class="mr-2">
+    <!-- For live capture, we now store captured images into an array via JavaScript -->
+    <form id="attendanceHomeForm" method="POST" action="{{ url_for('attendance_live') }}" class="mr-2">
       <input type="hidden" id="photoData" name="photoData">
-      <button type="submit" class="btn btn-success">Mark Attendance</button>
+      <button type="submit" class="btn btn-success">Mark Attendance (Live)</button>
     </form>
     <a href="{{ url_for('request_registration') }}" class="btn btn-info mr-2">Register Student Request</a>
     <a href="{{ url_for('show_attendance') }}" class="btn btn-secondary">View Attendance</a>
   </div>
-  <button id="captureButton" class="btn btn-primary mt-3">Capture Photo</button>
+  <div class="mt-3">
+    <button id="captureButton" class="btn btn-primary">Capture Photo</button>
+  </div>
 </div>
 <script>
+  // This script collects each captured photo into an array.
+  let capturedPhotos = [];
   document.getElementById('captureButton').addEventListener('click', function(){
     const canvas = document.getElementById('canvasElement');
     const video = document.getElementById('videoElement');
     let context = canvas.getContext('2d');
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     let dataURL = canvas.toDataURL('image/jpeg');
-    document.getElementById('photoData').value = dataURL;
+    capturedPhotos.push(dataURL);
+    // Update hidden input with JSON array of images
+    document.getElementById('photoData').value = JSON.stringify(capturedPhotos);
+    // Append to gallery
+    let img = document.createElement('img');
+    img.src = dataURL;
+    img.className = "img-fluid";
+    document.getElementById('capturedGallery').appendChild(img);
   });
 </script>
 {% endblock %}

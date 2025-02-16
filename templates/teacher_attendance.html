@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Take Attendance</h2>
-<p class="text-muted">Upload one or more photos for attendance.</p>
+<p class="text-muted">Upload one or more group photos for attendance. Detected faces will be annotated (green for known, red for unknown). If the same student appears in multiple photos, they are marked only once for the day.</p>
 <form method="POST" action="{{ url_for('teacher_attendance') }}" enctype="multipart/form-data">
   <div class="form-group">
     <label for="attendance_photos">Upload Photo(s):</label>

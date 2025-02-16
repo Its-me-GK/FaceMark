@@ -2,7 +2,7 @@
 {% block content %}
 <div class="text-center">
   <h2>Attendance Result</h2>
-  <p>The images below show detected faces with green boxes for recognized students and red boxes for unknown faces.</p>
+  <p>The images below show detected faces with green boxes for recognized students (ID) and red boxes for unknown faces.</p>
   <div class="row">
     {% if image_urls %}
       {% for url in image_urls %}
@@ -17,7 +17,7 @@
     {% endif %}
   </div>
   {% if session.user and session.user.role == 'teacher' %}
-    <a href="{{ url_for('teacher_index') }}" class="btn btn-primary mt-3">Return to Home</a>
+    <a href="{{ url_for('teacher_index') }}" class="btn btn-primary mt-3">Return to Dashboard</a>
   {% else %}
     <a href="{{ url_for('admin_index') }}" class="btn btn-primary mt-3">Return to Dashboard</a>
   {% endif %}
