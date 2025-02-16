@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
 import mysql.connector
 from config import Config
-from models.face_recognition import detect_faces, extract_face, get_embedding, cosine_similarity
+from models.face_recognition import detect_faces, nms_faces, extract_face, get_embedding, cosine_similarity
 from utils.image_processing import apply_filters
 from PIL import Image
 import numpy as np
@@ -16,6 +16,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 import cv2
 import concurrent.futures
+from werkzeug.utils import secure_filename  # <-- Import secure_filename
 
 # Configure TensorFlow GPU memory growth for better GPU utilization.
 import tensorflow as tf
@@ -118,7 +119,7 @@ def add_teacher():
         photo_file = request.files.get('photo')
         photo_url = ""
         if photo_file and photo_file.filename!="":
-            filename = f"teacher_{datetime.now().timestamp()}.jpg"
+            filename = f"teacher_{datetime.now().timestamp()}_{secure_filename(photo_file.filename)}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             Image.open(photo_file.stream).save(path)
             photo_url = url_for('static', filename='uploads/' + filename)
@@ -156,7 +157,7 @@ def edit_teacher(teacher_id):
         photo_file = request.files.get('photo')
         photo_url = None
         if photo_file and photo_file.filename!="":
-            filename = f"teacher_{datetime.now().timestamp()}.jpg"
+            filename = f"teacher_{datetime.now().timestamp()}_{secure_filename(photo_file.filename)}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             Image.open(photo_file.stream).save(path)
             photo_url = url_for('static', filename='uploads/' + filename)
@@ -232,6 +233,7 @@ def add_student():
             image = np.array(Image.open(file.stream).convert('RGB'))
             image = apply_filters(image)
             faces = detect_faces(image)
+            faces = nms_faces(faces, iou_threshold=0.5)
             if len(faces) != 1:
                 flash("Each student registration photo must contain exactly one face.", "danger")
                 return redirect(url_for('add_student'))
@@ -239,7 +241,7 @@ def add_student():
             face_img = extract_face(image, box)
             embedding = get_embedding(face_img)
             emb_str = ",".join(map(str, embedding.tolist()))
-            filename = f"{student_id}_{datetime.now().timestamp()}_{file.filename}"
+            filename = f"{student_id}_{datetime.now().timestamp()}_{secure_filename(file.filename)}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             Image.fromarray(image).save(path)
             cursor.execute("INSERT INTO student_faces (student_id, embedding, image_path) VALUES (%s, %s, %s)",
@@ -274,6 +276,7 @@ def edit_student(student_id):
                 image = np.array(Image.open(file.stream).convert('RGB'))
                 image = apply_filters(image)
                 faces = detect_faces(image)
+                faces = nms_faces(faces, iou_threshold=0.5)
                 if len(faces) != 1:
                     flash("Each student photo must contain exactly one face.", "danger")
                     return redirect(url_for('edit_student', student_id=student_id))
@@ -281,7 +284,7 @@ def edit_student(student_id):
                 face_img = extract_face(image, box)
                 embedding = get_embedding(face_img)
                 emb_str = ",".join(map(str, embedding.tolist()))
-                filename = f"{student_id}_{datetime.now().timestamp()}_{file.filename}"
+                filename = f"{student_id}_{datetime.now().timestamp()}_{secure_filename(file.filename)}"
                 path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 Image.fromarray(image).save(path)
                 cursor.execute("INSERT INTO student_faces (student_id, embedding, image_path) VALUES (%s, %s, %s)",
@@ -393,7 +396,7 @@ def manage_attendance():
     conn.close()
     return render_template('manage_attendance.html', records=records)
 
-# Admin - List Registration Requests and process them
+# Admin - List Registration Requests and Process Them
 @app.route('/admin/requests', endpoint='list_requests')
 def list_requests():
     if 'user' not in session or session['user']['role'] != 'admin':
@@ -421,10 +424,11 @@ def admin_action():
     if not req_data:
         flash("Request not found.", "danger")
         return redirect(url_for('list_requests'))
+    if req_data['status'] != 'pending':
+        flash("This request has already been processed.", "warning")
+        return redirect(url_for('list_requests'))
     if action == 'approved':
-        # Approve the request: register the student.
-        # We'll use the provided roll_number as student_id.
-        student_id = req_data['roll_number']
+        student_id = req_data['student_id']
         try:
             cursor.execute("INSERT INTO students (student_id, name, branch, class, roll_number) VALUES (%s, %s, %s, %s, %s)",
                            (student_id, req_data['student_name'], req_data['branch'], req_data['class'], req_data['roll_number']))
@@ -432,15 +436,19 @@ def admin_action():
         except mysql.connector.errors.IntegrityError:
             flash("Student already registered.", "danger")
             return redirect(url_for('list_requests'))
-        # Process each photo: photo1, photo2, photo3
         photos = [req_data['photo1'], req_data['photo2'], req_data['photo3']]
         for photo_url in photos:
-            # Get the absolute path from the URL (assuming static/uploads/ is used)
-            filename = photo_url.split('/')[-1]
+            # Use secure_filename to get the actual file name
+            filename = secure_filename(photo_url.split('/')[-1])
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            image = np.array(Image.open(image_path))
+            try:
+                image = np.array(Image.open(image_path))
+            except FileNotFoundError:
+                flash(f"File not found: {filename}", "danger")
+                return redirect(url_for('list_requests'))
             image = apply_filters(image)
             faces = detect_faces(image)
+            faces = nms_faces(faces, iou_threshold=0.5)
             if len(faces) != 1:
                 flash("Approved request photo validation failed.", "danger")
                 return redirect(url_for('list_requests'))
@@ -451,7 +459,6 @@ def admin_action():
             cursor.execute("INSERT INTO student_faces (student_id, embedding, image_path) VALUES (%s, %s, %s)",
                            (student_id, emb_str, photo_url))
             conn.commit()
-    # Update the request status
     cursor.execute("UPDATE student_requests SET status=%s WHERE request_id=%s", (action, request_id))
     conn.commit()
     cursor.close()
@@ -468,7 +475,6 @@ def teacher_index():
         return redirect(url_for('login'))
     return render_template('teacher_index.html')
 
-# Live capture: expects a JSON array of data URLs in 'photoData'
 @app.route('/teacher/attendance_live', methods=['POST'])
 def attendance_live():
     if 'user' not in session or session['user']['role'] != 'teacher':
@@ -751,6 +757,7 @@ def request_registration():
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
     if request.method == 'POST':
+        student_id = request.form.get('student_id')
         student_name = request.form.get('student_name')
         branch = request.form.get('branch')
         _class = request.form.get('class')
@@ -760,21 +767,23 @@ def request_registration():
             flash("Please upload exactly three photos for registration request.", "warning")
             return redirect(url_for('request_registration'))
         photo_urls = []
+        from models.face_recognition import nms_faces  # Ensure NMS is imported
         for file in files:
             image = np.array(Image.open(file.stream).convert('RGB'))
             image = apply_filters(image)
             faces = detect_faces(image)
+            faces = nms_faces(faces, iou_threshold=0.5)
             if len(faces) != 1:
                 flash("Each photo must contain exactly one face.", "danger")
                 return redirect(url_for('request_registration'))
-            filename = f"request_{datetime.now().timestamp()}_{file.filename}"
+            filename = f"request_{datetime.now().timestamp()}_{secure_filename(file.filename)}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             Image.fromarray(image).save(path)
             photo_urls.append(url_for('static', filename='uploads/' + filename))
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO student_requests (student_name, branch, class, roll_number, photo1, photo2, photo3) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                       (student_name, branch, _class, roll_number, photo_urls[0], photo_urls[1], photo_urls[2]))
+        cursor.execute("INSERT INTO student_requests (student_id, student_name, branch, class, roll_number, photo1, photo2, photo3) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                       (student_id, student_name, branch, _class, roll_number, photo_urls[0], photo_urls[1], photo_urls[2]))
         conn.commit()
         cursor.close()
         conn.close()

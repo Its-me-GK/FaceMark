@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS attendance (
 -- Student registration requests (submitted by teachers)
 CREATE TABLE IF NOT EXISTS student_requests (
   request_id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id VARCHAR(20),  -- Provided by teacher
   student_name VARCHAR(100),
   branch VARCHAR(50),
   class VARCHAR(50),
