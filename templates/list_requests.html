@@ -5,11 +5,14 @@
   <thead>
     <tr>
       <th>Request ID</th>
+      <th>Student ID</th>
       <th>Student Name</th>
       <th>Branch</th>
       <th>Class</th>
       <th>Roll Number</th>
-      <th>Photo</th>
+      <th>Photo 1</th>
+      <th>Photo 2</th>
+      <th>Photo 3</th>
       <th>Status</th>
       <th>Actions</th>
     </tr>
@@ -18,22 +21,29 @@
     {% for req in requests %}
     <tr>
       <td>{{ req.request_id }}</td>
+      <td>{{ req.student_id }}</td>
       <td>{{ req.student_name }}</td>
       <td>{{ req.branch }}</td>
       <td>{{ req.class }}</td>
       <td>{{ req.roll_number }}</td>
-      <td><img src="{{ req.photo }}" alt="Request Photo" style="width:50px;"></td>
+      <td><img src="{{ req.photo1 }}" alt="Photo 1" style="width:50px;"></td>
+      <td><img src="{{ req.photo2 }}" alt="Photo 2" style="width:50px;"></td>
+      <td><img src="{{ req.photo3 }}" alt="Photo 3" style="width:50px;"></td>
       <td>{{ req.status }}</td>
       <td>
+        {% if req.status == 'pending' %}
         <form method="POST" action="{{ url_for('admin_action') }}" style="display:inline-block;">
           <input type="hidden" name="request_id" value="{{ req.request_id }}">
           <select name="action" class="form-control form-control-sm" required>
             <option value="pending" {% if req.status=='pending' %}selected{% endif %}>Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
+            <option value="approved">Approve</option>
+            <option value="rejected">Reject</option>
           </select>
           <button type="submit" class="btn btn-primary btn-sm mt-1">Update</button>
         </form>
+        {% else %}
+          <span class="text-muted">{{ req.status|capitalize }}</span>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

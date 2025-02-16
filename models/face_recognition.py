@@ -38,7 +38,7 @@ def nms_faces(detections, iou_threshold=0.5):
     """Perform non-maximum suppression on detected faces."""
     if not detections:
         return []
-    # Sort detections by confidence score (highest first)
+    # Sort detections by confidence (highest first)
     detections = sorted(detections, key=lambda x: x.get('confidence', 0), reverse=True)
     nms = []
     while detections:

@@ -11,7 +11,7 @@
     <div id="capturedGallery"></div>
   </div>
   <div class="btn-group d-flex justify-content-center mt-3" role="group">
-    <!-- For live capture, we now store captured images into an array via JavaScript -->
+    <!-- Live capture: captured photos are stored in an array -->
     <form id="attendanceHomeForm" method="POST" action="{{ url_for('attendance_live') }}" class="mr-2">
       <input type="hidden" id="photoData" name="photoData">
       <button type="submit" class="btn btn-success">Mark Attendance (Live)</button>
@@ -24,7 +24,7 @@
   </div>
 </div>
 <script>
-  // This script collects each captured photo into an array.
+  // Collect captured photos into an array
   let capturedPhotos = [];
   document.getElementById('captureButton').addEventListener('click', function(){
     const canvas = document.getElementById('canvasElement');
@@ -33,9 +33,7 @@
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     let dataURL = canvas.toDataURL('image/jpeg');
     capturedPhotos.push(dataURL);
-    // Update hidden input with JSON array of images
     document.getElementById('photoData').value = JSON.stringify(capturedPhotos);
-    // Append to gallery
     let img = document.createElement('img');
     img.src = dataURL;
     img.className = "img-fluid";

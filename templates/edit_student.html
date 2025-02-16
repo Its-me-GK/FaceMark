@@ -1,4 +1,4 @@
-edit_student.html{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <h2>Edit Student</h2>
 <form method="POST" action="{{ url_for('edit_student', student_id=student.student_id) }}" enctype="multipart/form-data">

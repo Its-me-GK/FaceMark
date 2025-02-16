@@ -16,7 +16,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 import cv2
 import concurrent.futures
-from werkzeug.utils import secure_filename  # <-- Import secure_filename
+from werkzeug.utils import secure_filename
 
 # Configure TensorFlow GPU memory growth for better GPU utilization.
 import tensorflow as tf
@@ -308,8 +308,12 @@ def delete_student(student_id):
         return redirect(url_for('login'))
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM students WHERE student_id=%s", (student_id,))
-    conn.commit()
+    try:
+        cursor.execute("DELETE FROM students WHERE student_id=%s", (student_id,))
+        conn.commit()
+    except mysql.connector.errors.IntegrityError as e:
+        flash("Cannot delete student due to related attendance records.", "danger")
+        return redirect(url_for('list_students'))
     cursor.close()
     conn.close()
     flash("Student deleted successfully.", "success")
@@ -428,6 +432,27 @@ def admin_action():
         flash("This request has already been processed.", "warning")
         return redirect(url_for('list_requests'))
     if action == 'approved':
+        # Pre-check each photo for exactly one face
+        photos = [req_data['photo1'], req_data['photo2'], req_data['photo3']]
+        for photo_url in photos:
+            filename = secure_filename(photo_url.split('/')[-1])
+            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            try:
+                image = np.array(Image.open(image_path))
+            except FileNotFoundError:
+                flash(f"File not found: {filename}", "danger")
+                cursor.close()
+                conn.close()
+                return redirect(url_for('list_requests'))
+            image = apply_filters(image)
+            faces = detect_faces(image)
+            faces = nms_faces(faces, iou_threshold=0.5)
+            if len(faces) != 1:
+                flash("Approval failed: one of the photos did not contain exactly one face.", "danger")
+                cursor.close()
+                conn.close()
+                return redirect(url_for('list_requests'))
+        # All photos passed, now register student
         student_id = req_data['student_id']
         try:
             cursor.execute("INSERT INTO students (student_id, name, branch, class, roll_number) VALUES (%s, %s, %s, %s, %s)",
@@ -435,23 +460,16 @@ def admin_action():
             conn.commit()
         except mysql.connector.errors.IntegrityError:
             flash("Student already registered.", "danger")
+            cursor.close()
+            conn.close()
             return redirect(url_for('list_requests'))
-        photos = [req_data['photo1'], req_data['photo2'], req_data['photo3']]
         for photo_url in photos:
-            # Use secure_filename to get the actual file name
             filename = secure_filename(photo_url.split('/')[-1])
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            try:
-                image = np.array(Image.open(image_path))
-            except FileNotFoundError:
-                flash(f"File not found: {filename}", "danger")
-                return redirect(url_for('list_requests'))
+            image = np.array(Image.open(image_path))
             image = apply_filters(image)
             faces = detect_faces(image)
             faces = nms_faces(faces, iou_threshold=0.5)
-            if len(faces) != 1:
-                flash("Approved request photo validation failed.", "danger")
-                return redirect(url_for('list_requests'))
             box = faces[0]['box']
             face_img = extract_face(image, box)
             embedding = get_embedding(face_img)
@@ -767,7 +785,6 @@ def request_registration():
             flash("Please upload exactly three photos for registration request.", "warning")
             return redirect(url_for('request_registration'))
         photo_urls = []
-        from models.face_recognition import nms_faces  # Ensure NMS is imported
         for file in files:
             image = np.array(Image.open(file.stream).convert('RGB'))
             image = apply_filters(image)

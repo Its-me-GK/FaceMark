@@ -37,19 +37,19 @@ CREATE TABLE IF NOT EXISTS student_faces (
     FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE
 );
 
--- Attendance table
+-- Attendance table with cascade deletion
 CREATE TABLE IF NOT EXISTS attendance (
     id INT AUTO_INCREMENT PRIMARY KEY,
     student_id VARCHAR(20),
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(20),
-    FOREIGN KEY (student_id) REFERENCES students(student_id)
+    FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE
 );
 
 -- Student registration requests (submitted by teachers)
 CREATE TABLE IF NOT EXISTS student_requests (
   request_id INT AUTO_INCREMENT PRIMARY KEY,
-  student_id VARCHAR(20),  -- Provided by teacher
+  student_id VARCHAR(20),
   student_name VARCHAR(100),
   branch VARCHAR(50),
   class VARCHAR(50),
