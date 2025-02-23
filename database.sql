@@ -1,6 +1,6 @@
 -- Create the main database
-CREATE DATABASE IF NOT EXISTS face_attendance16;
-USE face_attendance16;
+CREATE DATABASE IF NOT EXISTS face_attendance21;
+USE face_attendance21;
 
 -- Users table for authentication
 CREATE TABLE IF NOT EXISTS users (

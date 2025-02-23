@@ -3,18 +3,18 @@ face_recognition_attendance/
 ├── config.py
 ├── database.sql
 ├── requirements.txt
-├── models
+├── models/
 │   ├── face_recognition.py
-│   └── facenet_keras.h5    (your pre-trained model)
-├── utils
+│   └── facenet_keras.h5        (your pre-trained FaceNet model)
+├── utils/
 │   └── image_processing.py
-├── static
-│   ├── css
+├── static/
+│   ├── css/
 │   │   └── style.css
-│   ├── js
+│   ├── js/
 │   │   └── main.js
-│   └── uploads            (create this folder)
-└── templates
+│   └── uploads/                (this folder must exist)
+└── templates/
     ├── base.html
     ├── welcome.html
     ├── login.html
@@ -30,4 +30,6 @@ face_recognition_attendance/
     ├── attendance_result.html
     ├── show_attendance.html
     ├── manage_attendance.html
-    └── list_requests.html
+    ├── list_requests.html
+    ├── edit_attendance.html
+    └── request_registration.html

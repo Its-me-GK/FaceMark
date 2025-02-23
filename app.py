@@ -2,7 +2,7 @@ import os
 import base64
 import io
 import json
-from datetime import datetime
+from datetime import datetime, date, time
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
 import mysql.connector
 from config import Config
@@ -92,7 +92,7 @@ def admin_index():
         return redirect(url_for('login'))
     return render_template('admin_index.html')
 
-# Admin - Teacher CRUD
+# Admin - Teacher CRUD (unchanged from previous)
 @app.route('/admin/teachers')
 def list_teachers():
     if 'user' not in session or session['user']['role'] != 'admin':
@@ -324,19 +324,56 @@ def admin_attendance():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    today = datetime.now().strftime('%Y-%m-%d')
+    # Get filter parameters (defaults: current date)
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
+    current_date = date.today().strftime("%Y-%m-%d")
+    current_time = datetime.now().strftime("%H:%M:%S")
+    # If no dates are provided, default to current date and show only today's present records
+    if not start_date:
+        start_date = current_date
+    if not end_date:
+        end_date = current_date
+    # If times are provided independently, set defaults:
+    if start_time and not end_time:
+        end_time = current_time
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute(
-        "SELECT s.roll_number, s.name, s.branch, a.status, a.timestamp FROM attendance a JOIN students s ON a.student_id = s.student_id WHERE DATE(a.timestamp)=%s ORDER BY s.roll_number",
-        (today,))
+    query = """
+        SELECT s.roll_number, s.name, s.branch, a.status, a.timestamp
+        FROM attendance a
+        JOIN students s ON a.student_id = s.student_id
+    """
+    conditions = []
+    params = []
+    # Apply filters independently
+    if start_date:
+        conditions.append("DATE(a.timestamp) >= %s")
+        params.append(start_date)
+    if end_date:
+        conditions.append("DATE(a.timestamp) <= %s")
+        params.append(end_date)
+    if start_time:
+        conditions.append("TIME(a.timestamp) >= %s")
+        params.append(start_time)
+    if end_time:
+        conditions.append("TIME(a.timestamp) <= %s")
+        params.append(end_time)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
+    cursor.execute(query, params)
     records = cursor.fetchall()
-    for r in records:
-        r['date'] = r['timestamp'].strftime('%Y-%m-%d')
     cursor.execute("SELECT COUNT(*) as total FROM students")
     total = cursor.fetchone()['total']
-    present = sum(1 for r in records if r['status']=='present')
+    # Compute present count from records that are marked 'present'
+    present = sum(1 for r in records if r['status'] == 'present')
     absent = total - present
+    # Ensure no negative values
+    if absent < 0:
+        absent = 0
     summary = {'total': total, 'present': present, 'absent': absent}
     cursor.close()
     conn.close()
@@ -430,6 +467,8 @@ def admin_action():
         return redirect(url_for('list_requests'))
     if req_data['status'] != 'pending':
         flash("This request has already been processed.", "warning")
+        cursor.close()
+        conn.close()
         return redirect(url_for('list_requests'))
     if action == 'approved':
         # Pre-check each photo for exactly one face
@@ -650,14 +689,23 @@ def attendance_result():
     return render_template('attendance_result.html', image_urls=image_urls)
 
 # ------------------- Show Attendance -------------------
-
+# The filtering logic: if any filter is missing, default to current values.
 @app.route('/show_attendance', methods=['GET'])
 def show_attendance():
-    view_all = request.args.get('view_all')
+    # Get filters from request args:
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     start_time = request.args.get('start_time')
     end_time = request.args.get('end_time')
+    current_date = date.today().strftime("%Y-%m-%d")
+    current_time = datetime.now().strftime("%H:%M:%S")
+    # Set defaults:
+    if not start_date:
+        start_date = current_date
+    if not end_date:
+        end_date = current_date
+    if start_time and not end_time:
+        end_time = current_time
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     query = """
@@ -681,18 +729,15 @@ def show_attendance():
         params.append(end_time)
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY s.roll_number"
+    query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
     cursor.execute(query, params)
     records = cursor.fetchall()
-    for r in records:
-        r['date'] = r['timestamp'].strftime('%Y-%m-%d')
-    if not view_all:
-        today = datetime.now().strftime('%Y-%m-%d')
-        records = [r for r in records if r['date'] == today and r['status'] == 'present']
     cursor.execute("SELECT COUNT(*) as total FROM students")
     total = cursor.fetchone()['total']
     present = sum(1 for r in records if r['status'] == 'present')
     absent = total - present
+    if absent < 0:
+        absent = 0
     summary = {'total': total, 'present': present, 'absent': absent}
     cursor.close()
     conn.close()
@@ -730,33 +775,45 @@ def download_attendance():
         params.append(end_time)
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY s.roll_number"
+    query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
     cursor.execute(query, params)
     records = cursor.fetchall()
     cursor.close()
     conn.close()
     df = pd.DataFrame(records)
+    # Format the timestamp as dd-mm-yyyy hh:mm AM/PM
+    if not df.empty:
+        df['timestamp'] = pd.to_datetime(df['timestamp']).dt.strftime("%d-%m-%Y %I:%M %p")
     if file_format == 'excel':
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='Attendance')
+            workbook  = writer.book
+            worksheet = writer.sheets['Attendance']
+            # Apply styling (e.g., header format)
+            header_format = workbook.add_format({
+                'bold': True,
+                'text_wrap': True,
+                'valign': 'middle',
+                'fg_color': '#D7E4BC',
+                'border': 1})
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(0, col_num, value, header_format)
         output.seek(0)
         return send_file(output, download_name="attendance.xlsx", as_attachment=True)
     elif file_format == 'pdf':
         output = io.BytesIO()
         doc = SimpleDocTemplate(output, pagesize=letter)
-        data = [['Roll Number', 'Name', 'Branch', 'Status', 'Timestamp']]
-        for index, row in df.iterrows():
-            data.append([row['roll_number'], row['name'], row['branch'], row['status'], str(row['timestamp'])])
+        data = [df.columns.tolist()] + df.values.tolist()
         table = Table(data)
         style = TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('BACKGROUND', (0,0), (-1,0), colors.grey),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+            ('ALIGN',(0,0),(-1,-1),'CENTER'),
+            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+            ('BOTTOMPADDING',(0,0),(-1,0),12),
+            ('BACKGROUND',(0,1),(-1,-1),colors.beige),
+            ('GRID',(0,0),(-1,-1),1,colors.black),
         ])
         table.setStyle(style)
         elements = [table]

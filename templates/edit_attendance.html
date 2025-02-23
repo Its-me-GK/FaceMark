@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Edit Attendance Record</h2>
+<form method="POST" action="{{ url_for('edit_attendance', attendance_id=record.id) }}">
+  <div class="form-group">
+    <label for="status">Status:</label>
+    <select class="form-control" id="status" name="status" required>
+      <option value="present" {% if record.status == 'present' %}selected{% endif %}>Present</option>
+      <option value="absent" {% if record.status == 'absent' %}selected{% endif %}>Absent</option>
+    </select>
+  </div>
+  <button type="submit" class="btn btn-primary">Update Record</button>
+</form>
+{% endblock %}

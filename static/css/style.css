@@ -39,10 +39,14 @@ body {
   margin-bottom: 30px;
 }
 
-/* Purple line-break for day separation */
-.day-break {
+/* Separators */
+.separator-purple {
   border-top: 2px solid purple;
-  margin: 20px 0;
+  margin: 10px 0;
+}
+.separator-green {
+  border-top: 5px solid green;
+  margin: 10px 0;
 }
 
 /* Captured photos gallery */
