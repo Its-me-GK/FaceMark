@@ -21,3 +21,17 @@ def apply_filters(image):
     cl = clahe.apply(l)
     limg = cv2.merge((cl, a, b))
     return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+
+
+# def apply_filters(image):
+#     """
+#     Convert the input RGB image to grayscale, apply histogram equalization to enhance contrast,
+#     and then convert back to RGB. This can work similarly to a black & white filter that enhances contrast.
+#     """
+#     # Convert to grayscale
+#     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+#     # Apply histogram equalization to improve contrast
+#     eq = cv2.equalizeHist(gray)
+#     # Convert back to RGB by replicating the single channel
+#     rgb_eq = cv2.cvtColor(eq, cv2.COLOR_GRAY2RGB)
+#     return rgb_eq

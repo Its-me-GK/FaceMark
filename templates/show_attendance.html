@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Attendance Records</h2>
-<form method="GET" action="{{ url_for('show_attendance') }}" class="form-inline mb-3">
+<form method="GET" action="{{ url_for('show_attendance_view') }}" class="form-inline mb-3">
   <label class="mr-2" for="start_date">Start Date:</label>
-  <input type="date" id="start_date" name="start_date" class="form-control mr-3" value="{{ request.args.get('start_date', '') }}">
+  <input type="date" id="start_date" name="start_date" class="form-control mr-3" value="{{ request.args.get('start_date','') }}">
   <label class="mr-2" for="end_date">End Date:</label>
-  <input type="date" id="end_date" name="end_date" class="form-control mr-3" value="{{ request.args.get('end_date', '') }}">
+  <input type="date" id="end_date" name="end_date" class="form-control mr-3" value="{{ request.args.get('end_date','') }}">
   <label class="mr-2" for="start_time">Start Time:</label>
-  <input type="time" id="start_time" name="start_time" class="form-control mr-3" value="{{ request.args.get('start_time', '') }}">
+  <input type="time" id="start_time" name="start_time" class="form-control mr-3" value="{{ request.args.get('start_time','') }}">
   <label class="mr-2" for="end_time">End Time:</label>
-  <input type="time" id="end_time" name="end_time" class="form-control mr-3" value="{{ request.args.get('end_time', '') }}">
+  <input type="time" id="end_time" name="end_time" class="form-control mr-3" value="{{ request.args.get('end_time','') }}">
   <button type="submit" class="btn btn-primary">Filter</button>
-  <a href="{{ url_for('show_attendance', view_all=1) }}" class="btn btn-secondary ml-2">View Complete Attendance</a>
+  <a href="{{ url_for('show_attendance_view', view_all=1) }}" class="btn btn-secondary ml-2">View Complete Attendance</a>
   <button type="button" id="clearRecords" class="btn btn-warning ml-2">Clear Records</button>
 </form>
 <div id="attendanceSummary">
@@ -19,21 +19,13 @@
     <p>Total Students: {{ summary.total }}, Present: {{ summary.present }}, Absent: {{ summary.absent }}</p>
   {% endif %}
 </div>
-{% if attendance_records %}
-  {% set current_date = None %}
-  {% for record in attendance_records %}
-    {% set formatted_dt = record.timestamp.strftime("%d-%m-%Y %I:%M %p") %}
-    {% set rec_date = record.timestamp.strftime("%d-%m-%Y") %}
-    {% if current_date != rec_date %}
-      {% if current_date is not none %}
-        {% if attendance_records|length == 1 %}
-          <div class="separator-purple"></div>
-        {% else %}
-          <div class="separator-green"></div>
-        {% endif %}
-      {% endif %}
-      {% set current_date = rec_date %}
-      <h4>{{ current_date }}</h4>
+{% if grouped_records %}
+  {% for date_header, recs in grouped_records.items() %}
+    <h4>{{ date_header }}</h4>
+    {% if grouped_records|length == 1 %}
+      <div class="separator-purple"></div>
+    {% else %}
+      <div class="separator-green"></div>
     {% endif %}
     <table class="table table-bordered">
       <thead>
@@ -46,21 +38,23 @@
         </tr>
       </thead>
       <tbody>
+        {% for rec in recs %}
         <tr>
-          <td>{{ record.roll_number }}</td>
-          <td>{{ record.name }}</td>
-          <td>{{ record.branch }}</td>
-          <td>{{ record.status }}</td>
-          <td>{{ formatted_dt }}</td>
+          <td>{{ rec.roll_number }}</td>
+          <td>{{ rec.name }}</td>
+          <td>{{ rec.branch }}</td>
+          <td>{{ rec.status }}</td>
+          <td>{{ rec.timestamp.strftime("%d-%m-%Y %I:%M %p") }}</td>
         </tr>
+        {% endfor %}
       </tbody>
     </table>
   {% endfor %}
-  <div class="mb-3">
-    <a href="{{ url_for('download_attendance', file_format='excel', start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), start_time=request.args.get('start_time'), end_time=request.args.get('end_time')) }}" class="btn btn-success">Download Excel</a>
-    <a href="{{ url_for('download_attendance', file_format='pdf', start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), start_time=request.args.get('start_time'), end_time=request.args.get('end_time')) }}" class="btn btn-danger">Download PDF</a>
-  </div>
 {% else %}
   <p>No attendance records found for the selected period.</p>
 {% endif %}
+<div class="mb-3">
+  <a href="{{ url_for('download_attendance_view', file_format='excel', start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), start_time=request.args.get('start_time'), end_time=request.args.get('end_time')) }}" class="btn btn-success">Download Excel</a>
+  <a href="{{ url_for('download_attendance_view', file_format='pdf', start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), start_time=request.args.get('start_time'), end_time=request.args.get('end_time')) }}" class="btn btn-danger">Download PDF</a>
+</div>
 {% endblock %}

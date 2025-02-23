@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Add Student</h2>
-<p class="text-muted">Please upload exactly three photos for accurate face registration. Each photo must contain exactly one face.</p>
+<p class="text-muted">Upload exactly three photos. Each photo must contain exactly one face.</p>
 <form method="POST" action="{{ url_for('add_student') }}" enctype="multipart/form-data">
   <div class="form-group">
     <label for="student_id">Student ID:</label>

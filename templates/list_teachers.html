@@ -20,7 +20,7 @@
       <td>{{ teacher.name }}</td>
       <td>{{ teacher.email }}</td>
       <td><img src="{{ teacher.photo }}" alt="Teacher Photo" style="width:50px;"></td>
-      <td>{{ teacher.username if teacher.username is defined else '' }}</td>
+      <td>{{ teacher.username }}</td>
       <td>
         <a href="{{ url_for('edit_teacher', teacher_id=teacher.teacher_id) }}" class="btn btn-warning btn-sm">Edit</a>
         <a href="{{ url_for('delete_teacher', teacher_id=teacher.teacher_id) }}" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure?');">Delete</a>

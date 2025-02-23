@@ -2,7 +2,7 @@ import os
 import base64
 import io
 import json
-from datetime import datetime, date, time
+from datetime import datetime, date
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
 import mysql.connector
 from config import Config
@@ -17,9 +17,9 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 import cv2
 import concurrent.futures
 from werkzeug.utils import secure_filename
+import tensorflow as tf
 
 # Configure TensorFlow GPU memory growth for better GPU utilization.
-import tensorflow as tf
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
     try:
@@ -35,18 +35,73 @@ app.secret_key = app.config['SECRET_KEY']
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 
-def get_db_connection():
-    conn = mysql.connector.connect(
-        host=app.config['MYSQL_HOST'],
-        user=app.config['MYSQL_USER'],
-        password=app.config['MYSQL_PASSWORD'],
-        database=app.config['MYSQL_DB']
-    )
-    conn.autocommit = True
-    return conn
+# ================= Database Helper =================
+class DatabaseHelper:
+    @staticmethod
+    def get_connection():
+        conn = mysql.connector.connect(
+            host=app.config['MYSQL_HOST'],
+            user=app.config['MYSQL_USER'],
+            password=app.config['MYSQL_PASSWORD'],
+            database=app.config['MYSQL_DB']
+        )
+        conn.autocommit = True
+        return conn
 
-# ------------------- Authentication -------------------
+# ================= Attendance Manager =================
+class AttendanceManager:
+    @staticmethod
+    def update_attendance(student_id, new_status):
+        today_str = date.today().strftime('%Y-%m-%d')
+        conn = DatabaseHelper.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM attendance WHERE student_id=%s AND DATE(timestamp)=%s", (student_id, today_str))
+        record = cursor.fetchone()
+        if record:
+            if record['status'] == 'absent' and new_status == 'present':
+                cursor.execute("UPDATE attendance SET status=%s WHERE id=%s", ('present', record['id']))
+                conn.commit()
+        else:
+            cursor.execute("INSERT INTO attendance (student_id, status) VALUES (%s, %s)", (student_id, new_status))
+            conn.commit()
+        cursor.close()
+        conn.close()
 
+    @staticmethod
+    def get_records(start_date, end_date, start_time=None, end_time=None):
+        conn = DatabaseHelper.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        query = """
+            SELECT s.student_id, s.roll_number, s.name, s.branch, a.status, a.timestamp
+            FROM students s
+            LEFT JOIN attendance a ON s.student_id = a.student_id
+              AND DATE(a.timestamp) BETWEEN %s AND %s
+        """
+        params = [start_date, end_date]
+        if start_time and end_time:
+            query += " AND TIME(a.timestamp) BETWEEN %s AND %s"
+            params.extend([start_time, end_time])
+        query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
+        cursor.execute(query, params)
+        records = cursor.fetchall()
+        for rec in records:
+            if rec['timestamp'] is None:
+                rec['timestamp'] = datetime.strptime(start_date, "%Y-%m-%d")
+        cursor.close()
+        conn.close()
+        return records
+
+# ================= Registration Manager =================
+class RegistrationManager:
+    @staticmethod
+    def validate_single_face(image):
+        faces = detect_faces(image)
+        faces = nms_faces(faces, iou_threshold=0.7)
+        return len(faces) == 1
+
+# ================= Routes =================
+
+# Authentication Routes
 @app.route('/')
 def root():
     return redirect(url_for('welcome'))
@@ -57,10 +112,10 @@ def welcome():
 
 @app.route('/login', methods=['GET','POST'])
 def login():
-    if request.method=='POST':
+    if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        conn = get_db_connection()
+        conn = DatabaseHelper.get_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT * FROM users WHERE username=%s AND password=%s", (username, password))
         user = cursor.fetchone()
@@ -83,8 +138,7 @@ def logout():
     flash("Logged out successfully.", "success")
     return redirect(url_for('welcome'))
 
-# ------------------- Admin Routes -------------------
-
+# ---------------- Admin Routes ----------------
 @app.route('/admin', endpoint='admin_index')
 def admin_index():
     if 'user' not in session or session['user']['role'] != 'admin':
@@ -92,13 +146,13 @@ def admin_index():
         return redirect(url_for('login'))
     return render_template('admin_index.html')
 
-# Admin - Teacher CRUD (unchanged from previous)
+# Teacher Management
 @app.route('/admin/teachers')
 def list_teachers():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT * FROM teachers")
     teachers = cursor.fetchall()
@@ -111,19 +165,19 @@ def add_teacher():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    if request.method=='POST':
+    if request.method == 'POST':
         name = request.form.get('name')
         email = request.form.get('email')
         username = request.form.get('username')
         password = request.form.get('password')
         photo_file = request.files.get('photo')
         photo_url = ""
-        if photo_file and photo_file.filename!="":
+        if photo_file and photo_file.filename != "":
             filename = f"teacher_{datetime.now().timestamp()}_{secure_filename(photo_file.filename)}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             Image.open(photo_file.stream).save(path)
             photo_url = url_for('static', filename='uploads/' + filename)
-        conn = get_db_connection()
+        conn = DatabaseHelper.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("INSERT INTO teachers (name, email, username, photo) VALUES (%s, %s, %s, %s)",
@@ -149,14 +203,14 @@ def edit_teacher(teacher_id):
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
-    if request.method=='POST':
+    if request.method == 'POST':
         name = request.form.get('name')
         email = request.form.get('email')
         photo_file = request.files.get('photo')
         photo_url = None
-        if photo_file and photo_file.filename!="":
+        if photo_file and photo_file.filename != "":
             filename = f"teacher_{datetime.now().timestamp()}_{secure_filename(photo_file.filename)}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             Image.open(photo_file.stream).save(path)
@@ -182,7 +236,7 @@ def delete_teacher(teacher_id):
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM teachers WHERE teacher_id=%s", (teacher_id,))
     conn.commit()
@@ -191,13 +245,13 @@ def delete_teacher(teacher_id):
     flash("Teacher deleted successfully.", "success")
     return redirect(url_for('list_teachers'))
 
-# Admin - Student CRUD
+# Student Management
 @app.route('/admin/students')
 def list_students():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT * FROM students")
     students = cursor.fetchall()
@@ -210,17 +264,17 @@ def add_student():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    if request.method=='POST':
+    if request.method == 'POST':
         student_id = request.form.get('student_id')
         name = request.form.get('name')
         branch = request.form.get('branch')
         _class = request.form.get('class')
         roll_number = request.form.get('roll_number')
         files = [request.files.get('face_photo1'), request.files.get('face_photo2'), request.files.get('face_photo3')]
-        if not all(files) or any(f.filename=="" for f in files):
+        if not all(files) or any(f.filename == "" for f in files):
             flash("Please upload exactly three photos.", "warning")
             return redirect(url_for('add_student'))
-        conn = get_db_connection()
+        conn = DatabaseHelper.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("INSERT INTO students (student_id, name, branch, class, roll_number) VALUES (%s, %s, %s, %s, %s)",
@@ -232,11 +286,11 @@ def add_student():
         for file in files:
             image = np.array(Image.open(file.stream).convert('RGB'))
             image = apply_filters(image)
-            faces = detect_faces(image)
-            faces = nms_faces(faces, iou_threshold=0.5)
-            if len(faces) != 1:
-                flash("Each student registration photo must contain exactly one face.", "danger")
+            if not RegistrationManager.validate_single_face(image):
+                flash("Each registration photo must contain exactly one face.", "danger")
                 return redirect(url_for('add_student'))
+            faces = detect_faces(image)
+            faces = nms_faces(faces, iou_threshold=0.7)
             box = faces[0]['box']
             face_img = extract_face(image, box)
             embedding = get_embedding(face_img)
@@ -258,9 +312,9 @@ def edit_student(student_id):
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
-    if request.method=='POST':
+    if request.method == 'POST':
         name = request.form.get('name')
         branch = request.form.get('branch')
         _class = request.form.get('class')
@@ -269,17 +323,17 @@ def edit_student(student_id):
                        (name, branch, _class, roll_number, student_id))
         conn.commit()
         files = [request.files.get('face_photo1'), request.files.get('face_photo2'), request.files.get('face_photo3')]
-        if all(files) and not any(f.filename=="" for f in files):
+        if all(files) and not any(f.filename == "" for f in files):
             cursor.execute("DELETE FROM student_faces WHERE student_id=%s", (student_id,))
             conn.commit()
             for file in files:
                 image = np.array(Image.open(file.stream).convert('RGB'))
                 image = apply_filters(image)
-                faces = detect_faces(image)
-                faces = nms_faces(faces, iou_threshold=0.5)
-                if len(faces) != 1:
+                if not RegistrationManager.validate_single_face(image):
                     flash("Each student photo must contain exactly one face.", "danger")
                     return redirect(url_for('edit_student', student_id=student_id))
+                faces = detect_faces(image)
+                faces = nms_faces(faces, iou_threshold=0.7)
                 box = faces[0]['box']
                 face_img = extract_face(image, box)
                 embedding = get_embedding(face_img)
@@ -306,7 +360,7 @@ def delete_student(student_id):
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM students WHERE student_id=%s", (student_id,))
@@ -319,48 +373,36 @@ def delete_student(student_id):
     flash("Student deleted successfully.", "success")
     return redirect(url_for('list_students'))
 
+# ---------------- Admin Attendance & Management ----------------
 @app.route('/admin/attendance')
 def admin_attendance():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    # Get filter parameters (defaults: current date)
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    start_date = request.args.get('start_date') or date.today().strftime("%Y-%m-%d")
+    end_date = request.args.get('end_date') or date.today().strftime("%Y-%m-%d")
     start_time = request.args.get('start_time')
     end_time = request.args.get('end_time')
-    current_date = date.today().strftime("%Y-%m-%d")
     current_time = datetime.now().strftime("%H:%M:%S")
-    # If no dates are provided, default to current date and show only today's present records
-    if not start_date:
-        start_date = current_date
-    if not end_date:
-        end_date = current_date
-    # If times are provided independently, set defaults:
     if start_time and not end_time:
         end_time = current_time
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
     query = """
-        SELECT s.roll_number, s.name, s.branch, a.status, a.timestamp
-        FROM attendance a
-        JOIN students s ON a.student_id = s.student_id
+        SELECT s.student_id, s.roll_number, s.name, s.branch, a.status, a.timestamp
+        FROM attendance a JOIN students s ON a.student_id = s.student_id
     """
     conditions = []
     params = []
-    # Apply filters independently
     if start_date:
         conditions.append("DATE(a.timestamp) >= %s")
         params.append(start_date)
     if end_date:
         conditions.append("DATE(a.timestamp) <= %s")
         params.append(end_date)
-    if start_time:
-        conditions.append("TIME(a.timestamp) >= %s")
-        params.append(start_time)
-    if end_time:
-        conditions.append("TIME(a.timestamp) <= %s")
-        params.append(end_time)
+    if start_time and end_time:
+        conditions.append("TIME(a.timestamp) BETWEEN %s AND %s")
+        params.extend([start_time, end_time])
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
@@ -368,25 +410,36 @@ def admin_attendance():
     records = cursor.fetchall()
     cursor.execute("SELECT COUNT(*) as total FROM students")
     total = cursor.fetchone()['total']
-    # Compute present count from records that are marked 'present'
     present = sum(1 for r in records if r['status'] == 'present')
     absent = total - present
-    # Ensure no negative values
     if absent < 0:
         absent = 0
     summary = {'total': total, 'present': present, 'absent': absent}
+    # Group records by date (dd-mm-yyyy) ensuring one record per student per day.
+    grouped = {}
+    for rec in records:
+        rec_date = rec['timestamp'].strftime("%d-%m-%Y") if rec['timestamp'] else "No Date"
+        if rec_date not in grouped:
+            grouped[rec_date] = []
+        if not any(r['student_id'] == rec['student_id'] for r in grouped[rec_date]):
+            grouped[rec_date].append(rec)
+        else:
+            existing = next(r for r in grouped[rec_date] if r['student_id'] == rec['student_id'])
+            if existing['status'] != 'present' and rec['status'] == 'present':
+                grouped[rec_date].remove(existing)
+                grouped[rec_date].append(rec)
     cursor.close()
     conn.close()
-    return render_template('show_attendance.html', attendance_records=records, summary=summary)
+    return render_template('show_attendance.html', grouped_records=grouped, summary=summary)
 
-@app.route('/admin/attendance/edit/<int:attendance_id>', methods=['GET','POST'])
+@app.route('/admin/attendance/edit/<int:attendance_id>', methods=['GET', 'POST'])
 def edit_attendance(attendance_id):
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
-    if request.method=='POST':
+    if request.method == 'POST':
         status = request.form.get('status')
         cursor.execute("UPDATE attendance SET status=%s WHERE id=%s", (status, attendance_id))
         conn.commit()
@@ -406,7 +459,7 @@ def delete_attendance(attendance_id):
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM attendance WHERE id=%s", (attendance_id,))
     conn.commit()
@@ -415,14 +468,14 @@ def delete_attendance(attendance_id):
     flash("Attendance record deleted.", "success")
     return redirect(url_for('admin_attendance'))
 
-@app.route('/admin/manage_attendance', methods=['GET','POST'])
+@app.route('/admin/manage_attendance', methods=['GET', 'POST'])
 def manage_attendance():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
-    if request.method=='POST':
+    if request.method == 'POST':
         student_id = request.form.get('student_id')
         date_str = request.form.get('date')
         status = request.form.get('status')
@@ -437,19 +490,20 @@ def manage_attendance():
     conn.close()
     return render_template('manage_attendance.html', records=records)
 
-# Admin - List Registration Requests and Process Them
+# ------------------- Admin Registration Requests -------------------
+
 @app.route('/admin/requests', endpoint='list_requests')
 def list_requests():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT * FROM student_requests")
-    requests = cursor.fetchall()
+    requests_data = cursor.fetchall()
     cursor.close()
     conn.close()
-    return render_template('list_requests.html', requests=requests)
+    return render_template('list_requests.html', requests=requests_data)
 
 @app.route('/admin/action', methods=['POST'])
 def admin_action():
@@ -458,12 +512,14 @@ def admin_action():
         return redirect(url_for('login'))
     request_id = request.form.get('request_id')
     action = request.form.get('action')
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT * FROM student_requests WHERE request_id=%s", (request_id,))
     req_data = cursor.fetchone()
     if not req_data:
         flash("Request not found.", "danger")
+        cursor.close()
+        conn.close()
         return redirect(url_for('list_requests'))
     if req_data['status'] != 'pending':
         flash("This request has already been processed.", "warning")
@@ -471,7 +527,6 @@ def admin_action():
         conn.close()
         return redirect(url_for('list_requests'))
     if action == 'approved':
-        # Pre-check each photo for exactly one face
         photos = [req_data['photo1'], req_data['photo2'], req_data['photo3']]
         for photo_url in photos:
             filename = secure_filename(photo_url.split('/')[-1])
@@ -485,13 +540,12 @@ def admin_action():
                 return redirect(url_for('list_requests'))
             image = apply_filters(image)
             faces = detect_faces(image)
-            faces = nms_faces(faces, iou_threshold=0.5)
+            faces = nms_faces(faces, iou_threshold=0.7)
             if len(faces) != 1:
                 flash("Approval failed: one of the photos did not contain exactly one face.", "danger")
                 cursor.close()
                 conn.close()
                 return redirect(url_for('list_requests'))
-        # All photos passed, now register student
         student_id = req_data['student_id']
         try:
             cursor.execute("INSERT INTO students (student_id, name, branch, class, roll_number) VALUES (%s, %s, %s, %s, %s)",
@@ -508,7 +562,7 @@ def admin_action():
             image = np.array(Image.open(image_path))
             image = apply_filters(image)
             faces = detect_faces(image)
-            faces = nms_faces(faces, iou_threshold=0.5)
+            faces = nms_faces(faces, iou_threshold=0.7)
             box = faces[0]['box']
             face_img = extract_face(image, box)
             embedding = get_embedding(face_img)
@@ -557,7 +611,7 @@ def attendance_live():
         faces = detect_faces(image)
         if not faces:
             continue
-        conn = get_db_connection()
+        conn = DatabaseHelper.get_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT student_id, embedding FROM student_faces")
         face_db = cursor.fetchall()
@@ -583,20 +637,17 @@ def attendance_live():
                 cv2.rectangle(image, (x, y), (x+w, y+h), (0, 0, 255), 2)
                 cv2.putText(image, "Unknown", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         all_annotated.append(image)
-    conn = get_db_connection()
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT student_id FROM students")
     all_students = {row['student_id'] for row in cursor.fetchall()}
-    for student in all_students:
-        status = 'present' if student in recognized else 'absent'
-        try:
-            cursor.execute("INSERT INTO attendance (student_id, status) VALUES (%s, %s)", (student, status))
-            conn.commit()
-        except mysql.connector.Error as err:
-            flash(f"Error marking attendance: {err}", "danger")
-            return redirect(url_for('teacher_index'))
     cursor.close()
     conn.close()
+    for student in all_students:
+        if student in recognized:
+            AttendanceManager.update_attendance(student, 'present')
+        else:
+            AttendanceManager.update_attendance(student, 'absent')
     filenames = []
     for idx, img in enumerate(all_annotated):
         fname = f"attendance_{datetime.now().timestamp()}_{idx}.jpg"
@@ -612,9 +663,9 @@ def teacher_attendance():
     if 'user' not in session or session['user']['role'] != 'teacher':
         flash("Access denied.", "danger")
         return redirect(url_for('login'))
-    if request.method=='POST':
+    if request.method == 'POST':
         photos = request.files.getlist('attendance_photos')
-        if not photos or all(photo.filename=="" for photo in photos):
+        if not photos or all(photo.filename == "" for photo in photos):
             flash("Please upload at least one photo.", "warning")
             return redirect(url_for('teacher_attendance'))
         recognized = set()
@@ -624,7 +675,7 @@ def teacher_attendance():
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
             img = apply_filters(img)
             faces = detect_faces(img)
-            conn = get_db_connection()
+            conn = DatabaseHelper.get_connection()
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT student_id, embedding FROM student_faces")
             face_db = cursor.fetchall()
@@ -652,20 +703,17 @@ def teacher_attendance():
             return img
         with concurrent.futures.ThreadPoolExecutor() as executor:
             annotated_imgs = list(executor.map(process_photo, photos))
-        conn = get_db_connection()
+        conn = DatabaseHelper.get_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT student_id FROM students")
         all_students = {row['student_id'] for row in cursor.fetchall()}
-        for student in all_students:
-            status = 'present' if student in recognized else 'absent'
-            try:
-                cursor.execute("INSERT INTO attendance (student_id, status) VALUES (%s, %s)", (student, status))
-                conn.commit()
-            except mysql.connector.Error as err:
-                flash(f"Error marking attendance: {err}", "danger")
-                return redirect(url_for('teacher_attendance'))
         cursor.close()
         conn.close()
+        for student in all_students:
+            if student in recognized:
+                AttendanceManager.update_attendance(student, 'present')
+            else:
+                AttendanceManager.update_attendance(student, 'absent')
         filenames = []
         for idx, img in enumerate(annotated_imgs):
             fname = f"attendance_{datetime.now().timestamp()}_{idx}.jpg"
@@ -677,8 +725,7 @@ def teacher_attendance():
         return render_template('attendance_result.html', image_urls=image_urls)
     return render_template('teacher_attendance.html')
 
-# ------------------- Attendance Result -------------------
-
+# ---------------- Attendance Result ----------------
 @app.route('/attendance_result')
 def attendance_result():
     filename = request.args.get('filename')
@@ -688,100 +735,71 @@ def attendance_result():
         image_urls = None
     return render_template('attendance_result.html', image_urls=image_urls)
 
-# ------------------- Show Attendance -------------------
-# The filtering logic: if any filter is missing, default to current values.
+# ---------------- Show Attendance ----------------
 @app.route('/show_attendance', methods=['GET'])
-def show_attendance():
-    # Get filters from request args:
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+def show_attendance_view():
+    start_date = request.args.get('start_date') or date.today().strftime("%Y-%m-%d")
+    end_date = request.args.get('end_date') or date.today().strftime("%Y-%m-%d")
     start_time = request.args.get('start_time')
     end_time = request.args.get('end_time')
-    current_date = date.today().strftime("%Y-%m-%d")
     current_time = datetime.now().strftime("%H:%M:%S")
-    # Set defaults:
-    if not start_date:
-        start_date = current_date
-    if not end_date:
-        end_date = current_date
     if start_time and not end_time:
         end_time = current_time
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    query = """
-        SELECT s.roll_number, s.name, s.branch, a.status, a.timestamp
-        FROM attendance a
-        JOIN students s ON a.student_id = s.student_id
-    """
-    conditions = []
-    params = []
-    if start_date:
-        conditions.append("DATE(a.timestamp) >= %s")
-        params.append(start_date)
-    if end_date:
-        conditions.append("DATE(a.timestamp) <= %s")
-        params.append(end_date)
-    if start_time:
-        conditions.append("TIME(a.timestamp) >= %s")
-        params.append(start_time)
-    if end_time:
-        conditions.append("TIME(a.timestamp) <= %s")
-        params.append(end_time)
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
-    cursor.execute(query, params)
-    records = cursor.fetchall()
-    cursor.execute("SELECT COUNT(*) as total FROM students")
-    total = cursor.fetchone()['total']
-    present = sum(1 for r in records if r['status'] == 'present')
+    records = AttendanceManager.get_records(start_date, end_date, start_time, end_time)
+    grouped = {}
+    for rec in records:
+        rec_date = rec['timestamp'].strftime("%d-%m-%Y")
+        if rec_date not in grouped:
+            grouped[rec_date] = []
+        if not any(r['student_id'] == rec['student_id'] for r in grouped[rec_date]):
+            grouped[rec_date].append(rec)
+        else:
+            existing = next(r for r in grouped[rec_date] if r['student_id'] == rec['student_id'])
+            if existing['status'] != 'present' and rec['status'] == 'present':
+                grouped[rec_date].remove(existing)
+                grouped[rec_date].append(rec)
+    total = len(records)
+    present = sum(1 for rec in records if rec['status'] == 'present')
     absent = total - present
     if absent < 0:
         absent = 0
     summary = {'total': total, 'present': present, 'absent': absent}
-    cursor.close()
-    conn.close()
-    return render_template('show_attendance.html', attendance_records=records, summary=summary)
+    return render_template('show_attendance.html', grouped_records=grouped, summary=summary)
 
-# ------------------- Download Attendance -------------------
-
-@app.route('/download_attendance')
-def download_attendance():
+# ---------------- Download Attendance ----------------
+@app.route('/download_attendance', methods=['GET'])
+def download_attendance_view():
     file_format = request.args.get('file_format', 'excel')
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    start_date = request.args.get('start_date') or date.today().strftime("%Y-%m-%d")
+    end_date = request.args.get('end_date') or date.today().strftime("%Y-%m-%d")
     start_time = request.args.get('start_time')
     end_time = request.args.get('end_time')
-    conn = get_db_connection()
+    current_time = datetime.now().strftime("%H:%M:%S")
+    if start_time and not end_time:
+        end_time = current_time
+    conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
     query = """
-        SELECT s.roll_number, s.name, s.branch, a.status, a.timestamp
-        FROM attendance a
-        JOIN students s ON a.student_id = s.student_id
+        SELECT s.roll_number, s.name, s.branch,
+               COALESCE(a.status, 'absent') as status,
+               a.timestamp
+        FROM students s
+        LEFT JOIN attendance a ON s.student_id = a.student_id
+          AND DATE(a.timestamp) BETWEEN %s AND %s
     """
-    conditions = []
-    params = []
-    if start_date:
-        conditions.append("DATE(a.timestamp) >= %s")
-        params.append(start_date)
-    if end_date:
-        conditions.append("DATE(a.timestamp) <= %s")
-        params.append(end_date)
-    if start_time:
-        conditions.append("TIME(a.timestamp) >= %s")
-        params.append(start_time)
-    if end_time:
-        conditions.append("TIME(a.timestamp) <= %s")
-        params.append(end_time)
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
+    params = [start_date, end_date]
+    if start_time and end_time:
+        query += " AND TIME(a.timestamp) BETWEEN %s AND %s"
+        params.extend([start_time, end_time])
     query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
     cursor.execute(query, params)
     records = cursor.fetchall()
     cursor.close()
     conn.close()
+    for rec in records:
+        if rec['timestamp'] is None:
+            rec['timestamp'] = datetime.strptime(start_date, "%Y-%m-%d")
     df = pd.DataFrame(records)
-    # Format the timestamp as dd-mm-yyyy hh:mm AM/PM
     if not df.empty:
         df['timestamp'] = pd.to_datetime(df['timestamp']).dt.strftime("%d-%m-%Y %I:%M %p")
     if file_format == 'excel':
@@ -790,7 +808,6 @@ def download_attendance():
             df.to_excel(writer, index=False, sheet_name='Attendance')
             workbook  = writer.book
             worksheet = writer.sheets['Attendance']
-            # Apply styling (e.g., header format)
             header_format = workbook.add_format({
                 'bold': True,
                 'text_wrap': True,
@@ -822,10 +839,9 @@ def download_attendance():
         return send_file(output, download_name="attendance.pdf", as_attachment=True)
     else:
         flash("Invalid file format requested.", "danger")
-        return redirect(url_for('show_attendance'))
+        return redirect(url_for('show_attendance_view'))
 
-# ------------------- Student Registration Request (Teacher) -------------------
-
+# ---------------- Student Registration Request (Teacher) ----------------
 @app.route('/teacher/request_registration', methods=['GET','POST'])
 def request_registration():
     if 'user' not in session or session['user']['role'] != 'teacher':
@@ -845,16 +861,14 @@ def request_registration():
         for file in files:
             image = np.array(Image.open(file.stream).convert('RGB'))
             image = apply_filters(image)
-            faces = detect_faces(image)
-            faces = nms_faces(faces, iou_threshold=0.5)
-            if len(faces) != 1:
+            if not RegistrationManager.validate_single_face(image):
                 flash("Each photo must contain exactly one face.", "danger")
                 return redirect(url_for('request_registration'))
             filename = f"request_{datetime.now().timestamp()}_{secure_filename(file.filename)}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             Image.fromarray(image).save(path)
             photo_urls.append(url_for('static', filename='uploads/' + filename))
-        conn = get_db_connection()
+        conn = DatabaseHelper.get_connection()
         cursor = conn.cursor()
         cursor.execute("INSERT INTO student_requests (student_id, student_name, branch, class, roll_number, photo1, photo2, photo3) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                        (student_id, student_name, branch, _class, roll_number, photo_urls[0], photo_urls[1], photo_urls[2]))

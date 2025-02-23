@@ -34,7 +34,7 @@ def iou(box1, box2):
         return 0
     return inter_area / union_area
 
-def nms_faces(detections, iou_threshold=0.5):
+def nms_faces(detections, iou_threshold=0.7):
     """Perform non-maximum suppression on detected faces."""
     if not detections:
         return []

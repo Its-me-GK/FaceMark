@@ -2,13 +2,13 @@
 {% block content %}
 <div class="text-center">
   <h2>Attendance Result</h2>
-  <p>The images below show detected faces with green boxes for recognized students (ID) and red boxes for unknown faces.</p>
+  <p>The images below show detected faces (green for recognized, red for unknown).</p>
   <div class="row">
     {% if image_urls %}
       {% for url in image_urls %}
       <div class="col-md-4 mb-3">
         <div class="card">
-          <img src="{{ url }}" alt="Annotated Attendance Image" class="card-img-top img-fluid">
+          <img src="{{ url }}" alt="Annotated Image" class="card-img-top img-fluid">
         </div>
       </div>
       {% endfor %}
@@ -16,10 +16,12 @@
       <p>No images to display.</p>
     {% endif %}
   </div>
-  {% if session.user and session.user.role == 'teacher' %}
-    <a href="{{ url_for('teacher_index') }}" class="btn btn-primary mt-3">Return to Dashboard</a>
-  {% else %}
-    <a href="{{ url_for('admin_index') }}" class="btn btn-primary mt-3">Return to Dashboard</a>
+  {% if session.user %}
+    {% if session.user.role == 'teacher' %}
+      <a href="{{ url_for('teacher_index') }}" class="btn btn-primary mt-3">Return to Dashboard</a>
+    {% else %}
+      <a href="{{ url_for('admin_index') }}" class="btn btn-primary mt-3">Return to Dashboard</a>
+    {% endif %}
   {% endif %}
 </div>
 {% endblock %}
