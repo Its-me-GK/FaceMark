@@ -1,7 +1,7 @@
 import cv2
+import numpy as np
 
 def resize_image(image, width=None, height=None):
-    """Resize an image while maintaining the aspect ratio."""
     if width is None and height is None:
         return image
     (h, w) = image.shape[:2]
@@ -13,25 +13,73 @@ def resize_image(image, width=None, height=None):
         dim = (width, int(h * ratio))
     return cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
 
-def apply_filters(image):
-    """Apply CLAHE filtering to enhance low-light images."""
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+def apply_clahe_filter(image):
+    """
+    Convert the input RGB image to LAB, apply CLAHE on the L-channel,
+    and convert back to RGB.
+    """
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     cl = clahe.apply(l)
     limg = cv2.merge((cl, a, b))
-    return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+    return cv2.cvtColor(limg, cv2.COLOR_LAB2RGB)
 
+def apply_hist_eq_filter(image):
+    """
+    Convert the input RGB image to grayscale, apply histogram equalization,
+    and then convert back to RGB.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    eq = cv2.equalizeHist(gray)
+    return cv2.cvtColor(eq, cv2.COLOR_GRAY2RGB)
 
-# def apply_filters(image):
-#     """
-#     Convert the input RGB image to grayscale, apply histogram equalization to enhance contrast,
-#     and then convert back to RGB. This can work similarly to a black & white filter that enhances contrast.
-#     """
-#     # Convert to grayscale
-#     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-#     # Apply histogram equalization to improve contrast
-#     eq = cv2.equalizeHist(gray)
-#     # Convert back to RGB by replicating the single channel
-#     rgb_eq = cv2.cvtColor(eq, cv2.COLOR_GRAY2RGB)
-#     return rgb_eq
+def correct_orientation(image):
+    """
+    Attempt to detect skew and correct image orientation using image moments.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    coords = np.column_stack(np.where(thresh > 0))
+    if len(coords) == 0:
+        return image
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+    (h, w) = image.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return rotated
+
+def apply_light_filter(image, gamma=1.2):
+    """
+    Apply a gentle gamma correction to brighten the image.
+    """
+    invGamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+    return cv2.LUT(image, table)
+
+def apply_bluish_filter(image):
+    """
+    Enhance the blue component by converting the image to LAB and reducing the 'b' channel.
+    (In LAB, the b channel represents blue-yellow; subtracting from b adds a bluish tint.)
+    """
+    lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(lab)
+    # Subtract a fixed value (e.g. 20) from b channel; adjust this value if needed.
+    b = cv2.subtract(a, 23)
+    lab_bluish = cv2.merge((l, a, b))
+    return cv2.cvtColor(lab_bluish, cv2.COLOR_LAB2RGB)
+
+def apply_sharpening_filter(image):
+    """
+    Apply a sharpening kernel to the image to enhance edges and details.
+    """
+    kernel = np.array([[0, -1, 0],
+                       [-1, 5, -1],
+                       [0, -1, 0]])
+    sharpened = cv2.filter2D(image, -1, kernel)
+    return sharpened

@@ -7,7 +7,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, sen
 import mysql.connector
 from config import Config
 from models.face_recognition import detect_faces, nms_faces, extract_face, get_embedding, cosine_similarity
-from utils.image_processing import apply_filters
+from utils.image_processing import apply_clahe_filter, apply_hist_eq_filter, correct_orientation, apply_light_filter, apply_sharpening_filter, apply_bluish_filter
 from PIL import Image
 import numpy as np
 import pandas as pd
@@ -19,7 +19,7 @@ import concurrent.futures
 from werkzeug.utils import secure_filename
 import tensorflow as tf
 
-# Configure TensorFlow GPU memory growth for better GPU utilization.
+# Configure TensorFlow GPU memory growth
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
     try:
@@ -94,14 +94,25 @@ class AttendanceManager:
 # ================= Registration Manager =================
 class RegistrationManager:
     @staticmethod
-    def validate_single_face(image):
-        faces = detect_faces(image)
-        faces = nms_faces(faces, iou_threshold=0.7)
-        return len(faces) == 1
+    def choose_filter_for_registration(image):
+        # Compute brightness on grayscale
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        mean_brightness = np.mean(gray)
+        if mean_brightness < 80:
+            return apply_light_filter(image, gamma=0.8)
+        elif mean_brightness > 180:
+            return apply_hist_eq_filter(image)
+        else:
+            return apply_clahe_filter(image)
+    
+    @staticmethod
+    def validate_single_face(image, min_confidence=0.90, iou_threshold=0.7):
+        processed_image = RegistrationManager.choose_filter_for_registration(image)
+        faces = detect_faces(processed_image, min_confidence=min_confidence)
+        faces = nms_faces(faces, iou_threshold=iou_threshold)
+        return (len(faces) == 1), processed_image
 
-# ================= Routes =================
-
-# Authentication Routes
+# ================= Authentication Routes =================
 @app.route('/')
 def root():
     return redirect(url_for('welcome'))
@@ -138,7 +149,7 @@ def logout():
     flash("Logged out successfully.", "success")
     return redirect(url_for('welcome'))
 
-# ---------------- Admin Routes ----------------
+# ================= Admin Routes =================
 @app.route('/admin', endpoint='admin_index')
 def admin_index():
     if 'user' not in session or session['user']['role'] != 'admin':
@@ -146,7 +157,7 @@ def admin_index():
         return redirect(url_for('login'))
     return render_template('admin_index.html')
 
-# Teacher Management
+# --- Teacher Management ---
 @app.route('/admin/teachers')
 def list_teachers():
     if 'user' not in session or session['user']['role'] != 'admin':
@@ -245,7 +256,7 @@ def delete_teacher(teacher_id):
     flash("Teacher deleted successfully.", "success")
     return redirect(url_for('list_teachers'))
 
-# Student Management
+# --- Student Management ---
 @app.route('/admin/students')
 def list_students():
     if 'user' not in session or session['user']['role'] != 'admin':
@@ -285,19 +296,19 @@ def add_student():
             return redirect(url_for('add_student'))
         for file in files:
             image = np.array(Image.open(file.stream).convert('RGB'))
-            image = apply_filters(image)
-            if not RegistrationManager.validate_single_face(image):
-                flash("Each registration photo must contain exactly one face.", "danger")
+            valid, proc_image = RegistrationManager.validate_single_face(image, min_confidence=0.90, iou_threshold=0.7)
+            if not valid:
+                flash("Each student registration photo must contain exactly one clear face.", "danger")
                 return redirect(url_for('add_student'))
-            faces = detect_faces(image)
+            faces = detect_faces(proc_image, min_confidence=0.90)
             faces = nms_faces(faces, iou_threshold=0.7)
             box = faces[0]['box']
-            face_img = extract_face(image, box)
+            face_img = extract_face(proc_image, box)
             embedding = get_embedding(face_img)
             emb_str = ",".join(map(str, embedding.tolist()))
             filename = f"{student_id}_{datetime.now().timestamp()}_{secure_filename(file.filename)}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            Image.fromarray(image).save(path)
+            Image.fromarray(proc_image).save(path)
             cursor.execute("INSERT INTO student_faces (student_id, embedding, image_path) VALUES (%s, %s, %s)",
                            (student_id, emb_str, url_for('static', filename='uploads/' + filename)))
             conn.commit()
@@ -328,19 +339,19 @@ def edit_student(student_id):
             conn.commit()
             for file in files:
                 image = np.array(Image.open(file.stream).convert('RGB'))
-                image = apply_filters(image)
-                if not RegistrationManager.validate_single_face(image):
-                    flash("Each student photo must contain exactly one face.", "danger")
+                valid, proc_image = RegistrationManager.validate_single_face(image, min_confidence=0.90, iou_threshold=0.7)
+                if not valid:
+                    flash("Each student photo must contain exactly one clear face.", "danger")
                     return redirect(url_for('edit_student', student_id=student_id))
-                faces = detect_faces(image)
+                faces = detect_faces(proc_image, min_confidence=0.90)
                 faces = nms_faces(faces, iou_threshold=0.7)
                 box = faces[0]['box']
-                face_img = extract_face(image, box)
+                face_img = extract_face(proc_image, box)
                 embedding = get_embedding(face_img)
                 emb_str = ",".join(map(str, embedding.tolist()))
                 filename = f"{student_id}_{datetime.now().timestamp()}_{secure_filename(file.filename)}"
                 path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                Image.fromarray(image).save(path)
+                Image.fromarray(proc_image).save(path)
                 cursor.execute("INSERT INTO student_faces (student_id, embedding, image_path) VALUES (%s, %s, %s)",
                                (student_id, emb_str, url_for('static', filename='uploads/' + filename)))
                 conn.commit()
@@ -415,7 +426,6 @@ def admin_attendance():
     if absent < 0:
         absent = 0
     summary = {'total': total, 'present': present, 'absent': absent}
-    # Group records by date (dd-mm-yyyy) ensuring one record per student per day.
     grouped = {}
     for rec in records:
         rec_date = rec['timestamp'].strftime("%d-%m-%Y") if rec['timestamp'] else "No Date"
@@ -432,7 +442,7 @@ def admin_attendance():
     conn.close()
     return render_template('show_attendance.html', grouped_records=grouped, summary=summary)
 
-@app.route('/admin/attendance/edit/<int:attendance_id>', methods=['GET', 'POST'])
+@app.route('/admin/attendance/edit/<int:attendance_id>', methods=['GET','POST'])
 def edit_attendance(attendance_id):
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
@@ -468,7 +478,7 @@ def delete_attendance(attendance_id):
     flash("Attendance record deleted.", "success")
     return redirect(url_for('admin_attendance'))
 
-@app.route('/admin/manage_attendance', methods=['GET', 'POST'])
+@app.route('/admin/manage_attendance', methods=['GET','POST'])
 def manage_attendance():
     if 'user' not in session or session['user']['role'] != 'admin':
         flash("Access denied.", "danger")
@@ -490,8 +500,7 @@ def manage_attendance():
     conn.close()
     return render_template('manage_attendance.html', records=records)
 
-# ------------------- Admin Registration Requests -------------------
-
+# ---------------- Admin Registration Requests ----------------
 @app.route('/admin/requests', endpoint='list_requests')
 def list_requests():
     if 'user' not in session or session['user']['role'] != 'admin':
@@ -538,11 +547,9 @@ def admin_action():
                 cursor.close()
                 conn.close()
                 return redirect(url_for('list_requests'))
-            image = apply_filters(image)
-            faces = detect_faces(image)
-            faces = nms_faces(faces, iou_threshold=0.7)
-            if len(faces) != 1:
-                flash("Approval failed: one of the photos did not contain exactly one face.", "danger")
+            image = apply_clahe_filter(image)
+            if not RegistrationManager.validate_single_face(image, min_confidence=0.90, iou_threshold=0.7)[0]:
+                flash("Approval failed: one of the photos did not contain exactly one clear face.", "danger")
                 cursor.close()
                 conn.close()
                 return redirect(url_for('list_requests'))
@@ -560,8 +567,8 @@ def admin_action():
             filename = secure_filename(photo_url.split('/')[-1])
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             image = np.array(Image.open(image_path))
-            image = apply_filters(image)
-            faces = detect_faces(image)
+            image = apply_clahe_filter(image)
+            faces = detect_faces(image, min_confidence=0.90)
             faces = nms_faces(faces, iou_threshold=0.7)
             box = faces[0]['box']
             face_img = extract_face(image, box)
@@ -577,8 +584,7 @@ def admin_action():
     flash("Request updated.", "success")
     return redirect(url_for('list_requests'))
 
-# ------------------- Teacher Routes -------------------
-
+# ---------------- Teacher Routes ----------------
 @app.route('/teacher')
 def teacher_index():
     if 'user' not in session or session['user']['role'] != 'teacher':
@@ -607,8 +613,8 @@ def attendance_live():
         data = base64.b64decode(encoded)
         image = np.array(Image.open(io.BytesIO(data)))
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        image = apply_filters(image)
-        faces = detect_faces(image)
+        image = apply_clahe_filter(image)
+        faces = detect_faces(image, min_confidence=0.85)
         if not faces:
             continue
         conn = DatabaseHelper.get_connection()
@@ -673,8 +679,8 @@ def teacher_attendance():
         def process_photo(file):
             img = np.array(Image.open(file.stream).convert('RGB'))
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-            img = apply_filters(img)
-            faces = detect_faces(img)
+            img = apply_bluish_filter(img)
+            faces = detect_faces(img, min_confidence=0.85)
             conn = DatabaseHelper.get_connection()
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT student_id, embedding FROM student_faces")
@@ -860,13 +866,13 @@ def request_registration():
         photo_urls = []
         for file in files:
             image = np.array(Image.open(file.stream).convert('RGB'))
-            image = apply_filters(image)
-            if not RegistrationManager.validate_single_face(image):
-                flash("Each photo must contain exactly one face.", "danger")
+            valid, proc_image = RegistrationManager.validate_single_face(image, min_confidence=0.90, iou_threshold=0.7)
+            if not valid:
+                flash("Each photo must contain exactly one clear face.", "danger")
                 return redirect(url_for('request_registration'))
             filename = f"request_{datetime.now().timestamp()}_{secure_filename(file.filename)}"
             path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            Image.fromarray(image).save(path)
+            Image.fromarray(proc_image).save(path)
             photo_urls.append(url_for('static', filename='uploads/' + filename))
         conn = DatabaseHelper.get_connection()
         cursor = conn.cursor()
