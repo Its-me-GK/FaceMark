@@ -7,7 +7,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, sen
 import mysql.connector
 from config import Config
 from models.face_recognition import detect_faces, nms_faces, extract_face, get_embedding, cosine_similarity
-from utils.image_processing import apply_clahe_filter, apply_hist_eq_filter, correct_orientation, apply_light_filter, apply_sharpening_filter, apply_bluish_filter
+from utils.image_processing import apply_clahe_filter, apply_bluish_filter_v2, apply_hist_eq_filter,apply_night_vision_filter, correct_orientation, apply_light_filter, apply_sharpening_filter, apply_bluish_filter,enhance_facial_features
 from PIL import Image
 import numpy as np
 import pandas as pd
@@ -49,20 +49,53 @@ class DatabaseHelper:
         return conn
 
 # ================= Attendance Manager =================
+# class AttendanceManager:
+#     @staticmethod
+#     def update_attendance(student_id, new_status):
+#         today_str = date.today().strftime('%Y-%m-%d')
+#         conn = DatabaseHelper.get_connection()
+#         cursor = conn.cursor(dictionary=True)
+#         cursor.execute("SELECT * FROM attendance WHERE student_id=%s AND DATE(timestamp)=%s", (student_id, today_str))
+#         record = cursor.fetchone()
+#         if record:
+#             if record['status'] == 'absent' and new_status == 'present':
+#                 cursor.execute("UPDATE attendance SET status=%s WHERE id=%s", ('present', record['id']))
+#                 conn.commit()
+#         else:
+#             cursor.execute("INSERT INTO attendance (student_id, status) VALUES (%s, %s)", (student_id, new_status))
+#             conn.commit()
+#         cursor.close()
+#         conn.close()
+
 class AttendanceManager:
     @staticmethod
     def update_attendance(student_id, new_status):
         today_str = date.today().strftime('%Y-%m-%d')
         conn = DatabaseHelper.get_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM attendance WHERE student_id=%s AND DATE(timestamp)=%s", (student_id, today_str))
+        # Execute the SELECT query.
+        cursor.execute(
+            "SELECT * FROM attendance WHERE student_id=%s AND DATE(timestamp)=%s", 
+            (student_id, today_str)
+        )
+        # Fetch one row (or all rows if needed) to ensure the result is fully read.
         record = cursor.fetchone()
+        # Clear any unread results
+        while cursor.nextset():
+            pass
+
         if record:
             if record['status'] == 'absent' and new_status == 'present':
-                cursor.execute("UPDATE attendance SET status=%s WHERE id=%s", ('present', record['id']))
+                cursor.execute(
+                    "UPDATE attendance SET status=%s WHERE id=%s", 
+                    ('present', record['id'])
+                )
                 conn.commit()
         else:
-            cursor.execute("INSERT INTO attendance (student_id, status) VALUES (%s, %s)", (student_id, new_status))
+            cursor.execute(
+                "INSERT INTO attendance (student_id, status) VALUES (%s, %s)", 
+                (student_id, new_status)
+            )
             conn.commit()
         cursor.close()
         conn.close()
@@ -96,20 +129,25 @@ class RegistrationManager:
     @staticmethod
     def choose_filter_for_registration(image):
         # Compute brightness on grayscale
+        # image = apply_clahe_filter(image) # added filter
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         mean_brightness = np.mean(gray)
         if mean_brightness < 80:
-            return apply_light_filter(image, gamma=0.8)
-        elif mean_brightness > 180:
+            image = apply_light_filter(image, gamma=0.8)
+            return apply_clahe_filter(image)
+        elif mean_brightness > 180: #need to verify manually
+            image = apply_bluish_filter(image)
             return apply_hist_eq_filter(image)
         else:
-            return apply_clahe_filter(image)
+            # return apply_clahe_filter(image)
+            return apply_bluish_filter_v2(image)
     
     @staticmethod
-    def validate_single_face(image, min_confidence=0.90, iou_threshold=0.7):
+    def validate_single_face(image, min_confidence=0.95, iou_threshold=0.8):
         processed_image = RegistrationManager.choose_filter_for_registration(image)
         faces = detect_faces(processed_image, min_confidence=min_confidence)
         faces = nms_faces(faces, iou_threshold=iou_threshold)
+        print(len(faces))
         return (len(faces) == 1), processed_image
 
 # ================= Authentication Routes =================
@@ -296,13 +334,14 @@ def add_student():
             return redirect(url_for('add_student'))
         for file in files:
             image = np.array(Image.open(file.stream).convert('RGB'))
-            valid, proc_image = RegistrationManager.validate_single_face(image, min_confidence=0.90, iou_threshold=0.7)
+            valid, proc_image = RegistrationManager.validate_single_face(image, min_confidence=0.95, iou_threshold=0.8)
             if not valid:
                 flash("Each student registration photo must contain exactly one clear face.", "danger")
                 return redirect(url_for('add_student'))
             faces = detect_faces(proc_image, min_confidence=0.90)
             faces = nms_faces(faces, iou_threshold=0.7)
             box = faces[0]['box']
+            # proc_image = RegistrationManager.choose_filter_for_registration(proc_image) # filter - adding student ++ /blue
             face_img = extract_face(proc_image, box)
             embedding = get_embedding(face_img)
             emb_str = ",".join(map(str, embedding.tolist()))
@@ -339,13 +378,14 @@ def edit_student(student_id):
             conn.commit()
             for file in files:
                 image = np.array(Image.open(file.stream).convert('RGB'))
-                valid, proc_image = RegistrationManager.validate_single_face(image, min_confidence=0.90, iou_threshold=0.7)
+                valid, proc_image = RegistrationManager.validate_single_face(image, min_confidence=0.95, iou_threshold=0.85)
                 if not valid:
                     flash("Each student photo must contain exactly one clear face.", "danger")
                     return redirect(url_for('edit_student', student_id=student_id))
-                faces = detect_faces(proc_image, min_confidence=0.90)
-                faces = nms_faces(faces, iou_threshold=0.7)
+                faces = detect_faces(proc_image, min_confidence=0.95)
+                faces = nms_faces(faces, iou_threshold=0.85)
                 box = faces[0]['box']
+                # proc_image = RegistrationManager.choose_filter_for_registration(proc_image) # filter - updating student ++ /blue
                 face_img = extract_face(proc_image, box)
                 embedding = get_embedding(face_img)
                 emb_str = ",".join(map(str, embedding.tolist()))
@@ -547,7 +587,8 @@ def admin_action():
                 cursor.close()
                 conn.close()
                 return redirect(url_for('list_requests'))
-            image = apply_clahe_filter(image)
+            # image = apply_clahe_filter(image)
+            image = RegistrationManager.choose_filter_for_registration(image) # filter - request approval
             if not RegistrationManager.validate_single_face(image, min_confidence=0.90, iou_threshold=0.7)[0]:
                 flash("Approval failed: one of the photos did not contain exactly one clear face.", "danger")
                 cursor.close()
@@ -567,7 +608,8 @@ def admin_action():
             filename = secure_filename(photo_url.split('/')[-1])
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             image = np.array(Image.open(image_path))
-            image = apply_clahe_filter(image)
+            # image = apply_clahe_filter(image) -- add below enhance feature then blue
+            image = RegistrationManager.choose_filter_for_registration(image) # filter - storing in db -admin add
             faces = detect_faces(image, min_confidence=0.90)
             faces = nms_faces(faces, iou_threshold=0.7)
             box = faces[0]['box']
@@ -613,7 +655,7 @@ def attendance_live():
         data = base64.b64decode(encoded)
         image = np.array(Image.open(io.BytesIO(data)))
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        image = apply_clahe_filter(image)
+        # image = RegistrationManager.choose_filter_for_registration(image) #filter - live
         faces = detect_faces(image, min_confidence=0.85)
         if not faces:
             continue
@@ -623,6 +665,7 @@ def attendance_live():
         face_db = cursor.fetchall()
         cursor.close()
         conn.close()
+        image=apply_clahe_filter(image) #added
         for face in faces:
             box = face['box']
             x, y, w, h = box
@@ -642,7 +685,7 @@ def attendance_live():
             else:
                 cv2.rectangle(image, (x, y), (x+w, y+h), (0, 0, 255), 2)
                 cv2.putText(image, "Unknown", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-        all_annotated.append(image)
+        all_annotated.append(image) #returning image for live
     conn = DatabaseHelper.get_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT student_id FROM students")
@@ -679,8 +722,10 @@ def teacher_attendance():
         def process_photo(file):
             img = np.array(Image.open(file.stream).convert('RGB'))
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-            img = apply_bluish_filter(img)
-            faces = detect_faces(img, min_confidence=0.85)
+            img = apply_clahe_filter(img)
+            # img = apply_bluish_filter(img)
+            # img = RegistrationManager.choose_filter_for_registration(img) # filter - manual
+            faces = detect_faces(img, min_confidence=0.90)
             conn = DatabaseHelper.get_connection()
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT student_id, embedding FROM student_faces")
@@ -699,7 +744,7 @@ def teacher_attendance():
                     if score > best_score:
                         best_score = score
                         best = rec['student_id']
-                if best_score > 0.7:
+                if best_score > 0.75: #matching score .62
                     recognized.add(best)
                     cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
                     cv2.putText(img, best, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)

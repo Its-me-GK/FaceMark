@@ -17,6 +17,7 @@ def detect_faces(image, min_confidence=0.95):
     faces = [face for face in faces if face.get('confidence', 0) >= min_confidence]
     return faces
 
+
 def iou(box1, box2):
     x1, y1, w1, h1 = box1
     x2, y2, w2, h2 = box2

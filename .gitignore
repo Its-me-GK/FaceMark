@@ -1,1 +1,19 @@
 static/uploads/
+.env
+models/facenet_keras.h5
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+# C extensions
+*.so
+# PyInstaller
+#  Usually these files are written to the dist/ directory.
+#  Often these files are created from a Windows operating system.
+*.manifest
+*.spec
+
+# Jupyter Notebook
+.ipynb_checkpoints
+.vscode/ #VS code
+*.pyc #compiled python files
