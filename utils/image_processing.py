@@ -25,31 +25,6 @@ def apply_clahe_filter(image):
     limg = cv2.merge((cl, a, b))
     return cv2.cvtColor(limg, cv2.COLOR_LAB2RGB)
 
-# def apply_clahe_filter(image):
-#     """
-#     Convert the input RGB image to LAB, apply CLAHE on the L-channel,
-#     and convert back to RGB, with focus on facial areas.
-#     """
-#     # Convert the input RGB image to LAB
-#     lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
-#     l, a, b = cv2.split(lab)
-    
-#     # Create a mask for the facial regions (example coordinates)
-#     mask = np.zeros_like(l)
-#     h, w = l.shape
-#     x, y, face_w, face_h = w // 3, h // 3, w // 3, h // 3
-#     mask[y:y+face_h, x:x+face_w] = 255
-
-#     # Apply CLAHE on the L-channel within the masked regions only
-#     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-#     cl = l.copy()
-#     cl[mask == 255] = clahe.apply(l[mask == 255])
-    
-#     # Merge channels and convert back to RGB
-#     limg = cv2.merge((cl, a, b))
-#     return cv2.cvtColor(limg, cv2.COLOR_LAB2RGB)
-
-
 def apply_hist_eq_filter(image):
     """
     Convert the input RGB image to grayscale, apply histogram equalization,
