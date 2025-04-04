@@ -1,5 +1,9 @@
 static/uploads/
 .env
+.pem
+Deploy
+Workflow.md
+config.json
 models/facenet_keras.h5
 # Byte-compiled / optimized / DLL files
 __pycache__/
