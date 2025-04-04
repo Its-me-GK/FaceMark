@@ -1,4 +1,4 @@
-face_recognition_attendance/
+FaceMark/
 ├── app.py
 ├── config.py
 ├── database.sql

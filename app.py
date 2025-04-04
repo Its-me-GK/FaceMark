@@ -4,6 +4,7 @@ import io
 import json
 from datetime import datetime, date
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
+# from flask_talisman import Talisman
 import mysql.connector
 from config import Config
 from models.face_recognition import detect_faces, nms_faces, extract_face, get_embedding, cosine_similarity
@@ -31,6 +32,58 @@ if gpus:
 app = Flask(__name__)
 app.config.from_object(Config)
 app.secret_key = app.config['SECRET_KEY']
+
+#flask - talisman for secure connection :
+
+# talisman = Talisman(app)
+ 
+# # Content Security Policy (CSP) Header
+# csp = {
+#     'default-src': [
+#         "'self'", 
+#         'https://code.jquery.com', 
+#         'https://cdn.jsdelivr.net',
+#         'https://stackpath.bootstrapcdn.com'
+#     ],
+#     'style-src': [
+#         "'self'", 
+#         'https://stackpath.bootstrapcdn.com', 
+#         "'unsafe-inline'"
+#     ],
+#     'script-src': [
+#         "'self'", 
+#         'https://stackpath.bootstrapcdn.com',
+#         'https://code.jquery.com', 
+#         'https://cdn.jsdelivr.net',
+#         "'unsafe-inline'"
+#     ],
+#     'img-src': [
+#         "'self'", 
+#         'data:', 
+#         'https://stackpath.bootstrapcdn.com'
+#     ]
+# }
+
+
+# # HTTP Strict Transport Security (HSTS) Header
+# hsts = {
+#     'max-age': 31536000,
+#     'includeSubDomains': True
+# }
+# # Enforce HTTPS and other headers
+# talisman.force_https = True
+# talisman.force_file_save = True
+# talisman.x_xss_protection = True
+# talisman.session_cookie_secure = True
+# talisman.session_cookie_samesite = 'Lax'
+# talisman.frame_options_allow_from = 'https://www.google.com'
+ 
+# # Add the headers to Talisman
+# talisman.content_security_policy = csp
+# talisman.strict_transport_security = hsts
+
+#talisman connection
+
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -137,7 +190,8 @@ class RegistrationManager:
             return apply_clahe_filter(image)
         elif mean_brightness > 180: #need to verify manually
             image = apply_bluish_filter(image)
-            return apply_hist_eq_filter(image)
+            # return apply_hist_eq_filter(image)
+            return image
         else:
             # return apply_clahe_filter(image)
             return apply_bluish_filter_v2(image)
@@ -722,8 +776,8 @@ def teacher_attendance():
         def process_photo(file):
             img = np.array(Image.open(file.stream).convert('RGB'))
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-            img = apply_clahe_filter(img)
-            # img = apply_bluish_filter(img)
+            # img = apply_clahe_filter(img)
+            img = apply_bluish_filter(img)
             # img = RegistrationManager.choose_filter_for_registration(img) # filter - manual
             faces = detect_faces(img, min_confidence=0.90)
             conn = DatabaseHelper.get_connection()
@@ -744,7 +798,9 @@ def teacher_attendance():
                     if score > best_score:
                         best_score = score
                         best = rec['student_id']
-                if best_score > 0.75: #matching score .62
+                if(best_score>0.76):
+                    print(best_score)
+                if best_score > 0.76: #matching score .62
                     recognized.add(best)
                     cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
                     cv2.putText(img, best, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
@@ -932,3 +988,4 @@ def request_registration():
 
 if __name__ == '__main__':
     app.run(debug=True)
+    # app.run(debug=True, host='0.0.0.0' , ssl_context=('Deploy/cert.pem', 'Deploy/key.pem'))
