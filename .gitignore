@@ -5,6 +5,12 @@ Deploy
 Workflow.md
 config.json
 models/facenet_keras.h5
+
+# Evaluation files
+ground_truth.json
+*.png
+evaluate_metrics.py
+test_images/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
