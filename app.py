@@ -167,7 +167,7 @@ class AttendanceManager:
         if start_time and end_time:
             query += " AND TIME(a.timestamp) BETWEEN %s AND %s"
             params.extend([start_time, end_time])
-        query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
+        query += " ORDER BY DATE(a.timestamp) ASC, CAST(s.roll_number AS UNSIGNED) ASC"
         cursor.execute(query, params)
         records = cursor.fetchall()
         for rec in records:
@@ -510,7 +510,7 @@ def admin_attendance():
         params.extend([start_time, end_time])
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
+    query += " ORDER BY DATE(a.timestamp) ASC, CAST(s.roll_number AS UNSIGNED) ASC" #casted roll number into string to number
     cursor.execute(query, params)
     records = cursor.fetchall()
     cursor.execute("SELECT COUNT(*) as total FROM students")
@@ -800,7 +800,7 @@ def teacher_attendance():
                         best = rec['student_id']
                 if(best_score>0.76):
                     print(best_score)
-                if best_score > 0.76: #matching score .62
+                if best_score > 0.77: #matching score .62
                     recognized.add(best)
                     cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
                     cv2.putText(img, best, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
@@ -898,7 +898,7 @@ def download_attendance_view():
     if start_time and end_time:
         query += " AND TIME(a.timestamp) BETWEEN %s AND %s"
         params.extend([start_time, end_time])
-    query += " ORDER BY DATE(a.timestamp) ASC, s.roll_number ASC"
+    query += " ORDER BY DATE(a.timestamp) ASC, CAST(s.roll_number AS UNSIGNED) ASC"
     cursor.execute(query, params)
     records = cursor.fetchall()
     cursor.close()
