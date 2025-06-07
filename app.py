@@ -4,7 +4,6 @@ import io
 import json
 from datetime import datetime, date
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
-# from flask_talisman import Talisman
 import mysql.connector
 from config import Config
 from models.face_recognition import detect_faces, nms_faces, extract_face, get_embedding, cosine_similarity
@@ -32,58 +31,6 @@ if gpus:
 app = Flask(__name__)
 app.config.from_object(Config)
 app.secret_key = app.config['SECRET_KEY']
-
-#flask - talisman for secure connection :
-
-# talisman = Talisman(app)
- 
-# # Content Security Policy (CSP) Header
-# csp = {
-#     'default-src': [
-#         "'self'", 
-#         'https://code.jquery.com', 
-#         'https://cdn.jsdelivr.net',
-#         'https://stackpath.bootstrapcdn.com'
-#     ],
-#     'style-src': [
-#         "'self'", 
-#         'https://stackpath.bootstrapcdn.com', 
-#         "'unsafe-inline'"
-#     ],
-#     'script-src': [
-#         "'self'", 
-#         'https://stackpath.bootstrapcdn.com',
-#         'https://code.jquery.com', 
-#         'https://cdn.jsdelivr.net',
-#         "'unsafe-inline'"
-#     ],
-#     'img-src': [
-#         "'self'", 
-#         'data:', 
-#         'https://stackpath.bootstrapcdn.com'
-#     ]
-# }
-
-
-# # HTTP Strict Transport Security (HSTS) Header
-# hsts = {
-#     'max-age': 31536000,
-#     'includeSubDomains': True
-# }
-# # Enforce HTTPS and other headers
-# talisman.force_https = True
-# talisman.force_file_save = True
-# talisman.x_xss_protection = True
-# talisman.session_cookie_secure = True
-# talisman.session_cookie_samesite = 'Lax'
-# talisman.frame_options_allow_from = 'https://www.google.com'
- 
-# # Add the headers to Talisman
-# talisman.content_security_policy = csp
-# talisman.strict_transport_security = hsts
-
-#talisman connection
-
 
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
